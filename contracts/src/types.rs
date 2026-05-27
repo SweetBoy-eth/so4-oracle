@@ -283,6 +283,9 @@ pub enum OrderType {
     /// Open or increase a position when price drops to / below trigger_price
     /// (for longs) or rises to / above trigger_price (for shorts).
     LimitIncrease,
+    /// Open or increase a position when price rises to / above trigger_price
+    /// (for longs) or drops to / below trigger_price (for shorts).
+    StopIncrease,
     /// Close or decrease a position when price drops to / below trigger_price.
     StopLossDecrease,
     /// Swap tokens when the execution price satisfies the trigger condition.
