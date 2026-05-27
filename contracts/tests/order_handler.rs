@@ -55,6 +55,7 @@ fn make_long_position(env: &Env, market_id: u32) -> Position {
         size_in_usd: 0,
         size_in_tokens: 0,
         collateral_amount: 0,
+    referral_code: soroban_sdk::BytesN::from_array(&env, &[0u8; 32]),
     }
 }
 
@@ -460,6 +461,7 @@ fn test_limit_increase_long_at_trigger_executes() {
         size_in_usd: 0,
         size_in_tokens: 0,
         collateral_amount: 0,
+    referral_code: soroban_sdk::BytesN::from_array(&env, &[0u8; 32]),
     };
     increase_position(
         &env,

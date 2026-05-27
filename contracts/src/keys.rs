@@ -1,4 +1,5 @@
-use soroban_sdk::{BytesN, Env};
+use soroban_sdk::{Address, BytesN, Env};
+use soroban_sdk::xdr::ToXdr;
 
 // ---------------------------------------------------------------------------
 // Market key generators
@@ -185,4 +186,26 @@ pub fn max_leverage_key(env: &Env, market_id: u32) -> BytesN<32> {
 
 pub fn max_pnl_factor_key(env: &Env, market_id: u32) -> BytesN<32> {
     market_scoped_key(env, b"maxpnlfc", market_id)
+}
+
+// ---------------------------------------------------------------------------
+// Pricing key generators
+// ---------------------------------------------------------------------------
+
+pub fn price_impact_factor_key(env: &Env, market_id: u32) -> BytesN<32> {
+    market_scoped_key(env, b"pimpactf", market_id)
+}
+
+// ---------------------------------------------------------------------------
+// Referral key generators
+// ---------------------------------------------------------------------------
+
+pub fn claimable_referral_amount_key(env: &Env, code_owner: &Address, token: &Address) -> BytesN<32> {
+    let mut buf = [0u8; 32];
+    buf[..8].copy_from_slice(b"clmref_a");
+    let owner_bytes: [u8; 32] = env.crypto().sha256(&code_owner.to_xdr(env)).to_array();
+    let token_bytes: [u8; 32] = env.crypto().sha256(&token.to_xdr(env)).to_array();
+    buf[8..16].copy_from_slice(&owner_bytes[..8]);
+    buf[16..24].copy_from_slice(&token_bytes[..8]);
+    BytesN::from_array(env, &buf)
 }

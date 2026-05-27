@@ -91,6 +91,7 @@ fn test_get_adl_targets_sorted_by_pnl_desc() {
             average_price: entry_price,
             is_long: true,
             is_open: true,
+        referral_code: soroban_sdk::BytesN::from_array(&env, &[0u8; 32]),
         };
         ds.set_position_props(&admin, &key, &pos);
         ds.add_position_to_oi_list(&admin, &market_id, &true, &key);
@@ -144,6 +145,7 @@ fn test_get_adl_targets_count_limits_results() {
             average_price: 90 + (seed as u128) * 5, // entry=95, 100, 105
             is_long: true,
             is_open: true,
+        referral_code: soroban_sdk::BytesN::from_array(&env, &[0u8; 32]),
         };
         ds.set_position_props(&admin, &key, &pos);
         ds.add_position_to_oi_list(&admin, &market_id, &true, &key);
@@ -179,6 +181,7 @@ fn test_get_adl_targets_count_exceeds_positions() {
         average_price: 90,
         is_long: true,
         is_open: true,
+    referral_code: soroban_sdk::BytesN::from_array(&env, &[0u8; 32]),
     };
     ds.set_position_props(&admin, &key, &pos);
     ds.add_position_to_oi_list(&admin, &market_id, &true, &key);

@@ -2,9 +2,11 @@ use soroban_sdk::{contract, contractimpl, contracttype, Address, BytesN, Env, Ve
 
 use crate::{
     data_store::DataStoreClient,
+    keys::{open_interest_long_key, open_interest_short_key, price_impact_factor_key},
     liquidity_handler::LiquidityHandlerClient,
     position_utils::calculate_pnl,
-    types::PositionProps,
+    pricing_utils::get_execution_price as compute_execution_price,
+    types::{ExecutionPriceResult, PositionProps},
 };
 
 #[contract]
@@ -81,6 +83,54 @@ impl Reader {
             result.push_back(entries.get(i).unwrap());
         }
         result
+    }
+
+    /// Preview the execution price for `size_delta_usd` on the given position,
+    /// including OI-based price impact. Returns prices with and without impact.
+    pub fn get_execution_price(
+        env: Env,
+        position_key: BytesN<32>,
+        size_delta_usd: u128,
+        is_increase: bool,
+    ) -> ExecutionPriceResult {
+        let ds = Self::data_store(&env);
+        let lh = Self::liquidity_handler(&env);
+
+        let pos: PositionProps = ds
+            .get_position_props(&position_key)
+            .expect("position not found");
+
+        let prices = lh.oracle_prices(&pos.market_id);
+        let index_price = if pos.is_long {
+            prices.long_price
+        } else {
+            prices.short_price
+        };
+
+        let long_oi = ds
+            .get_u128(&open_interest_long_key(&env, pos.market_id))
+            .unwrap_or(0);
+        let short_oi = ds
+            .get_u128(&open_interest_short_key(&env, pos.market_id))
+            .unwrap_or(0);
+        let impact_factor = ds
+            .get_u128(&price_impact_factor_key(&env, pos.market_id))
+            .unwrap_or(0);
+
+        let result = compute_execution_price(
+            index_price,
+            size_delta_usd,
+            long_oi,
+            short_oi,
+            pos.is_long,
+            is_increase,
+            impact_factor,
+        );
+
+        ExecutionPriceResult {
+            price_without_impact: result.price_without_impact,
+            price_with_impact: result.price_with_impact,
+        }
     }
 
     // -----------------------------------------------------------------------

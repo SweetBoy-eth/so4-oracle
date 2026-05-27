@@ -94,6 +94,39 @@ pub struct PositionProps {
     pub average_price: u128,
     pub is_long: bool,
     pub is_open: bool,
+    /// Referral code hash; all-zero means no referral.
+    pub referral_code: BytesN<32>,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ExecutionPriceResult {
+    pub price_without_impact: i128,
+    pub price_with_impact: i128,
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TierConfig {
+    /// Basis points of the position fee rebated to the code owner.
+    pub rebate_bps: u32,
+    /// Basis points of the position fee discounted for the trader.
+    pub discount_bps: u32,
+}
+
+#[contracttype]
+#[derive(Copy, Clone, Debug, Eq, PartialEq)]
+#[repr(u32)]
+pub enum ReferralError {
+    Unauthorized = 60,
+    CodeAlreadyRegistered = 61,
+    CodeNotFound = 62,
+}
+
+impl From<ReferralError> for soroban_sdk::Error {
+    fn from(e: ReferralError) -> Self {
+        soroban_sdk::Error::from_contract_error(e as u32)
+    }
 }
 
 #[contracttype]
@@ -153,6 +186,7 @@ pub struct Position {
     pub size_in_usd: u128,
     pub size_in_tokens: u128,
     pub collateral_amount: u128,
+    pub referral_code: BytesN<32>,
 }
 
 #[contracttype]

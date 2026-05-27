@@ -111,6 +111,7 @@ fn test_execute_adl_partial_then_full_close() {
             size_in_usd: 10_000,
             size_in_tokens: 100,
             collateral_amount: 1_000,
+        referral_code: soroban_sdk::BytesN::from_array(&s.env, &[0u8; 32]),
         },
     );
 
@@ -308,6 +309,7 @@ fn test_stop_loss_decrease_executes_below_trigger() {
             size_in_usd: 1_000,
             size_in_tokens: 10,
             collateral_amount: 1_000,
+        referral_code: soroban_sdk::BytesN::from_array(&s.env, &[0u8; 32]),
         },
     );
 
@@ -346,6 +348,7 @@ fn test_stop_loss_decrease_rejects_above_trigger() {
             size_in_usd: 1_000,
             size_in_tokens: 10,
             collateral_amount: 1_000,
+        referral_code: soroban_sdk::BytesN::from_array(&s.env, &[0u8; 32]),
         },
     );
 
@@ -393,6 +396,7 @@ fn test_short_limit_decrease_executes_below_trigger() {
             size_in_usd: 1_000,
             size_in_tokens: 10,
             collateral_amount: 1_000,
+        referral_code: soroban_sdk::BytesN::from_array(&s.env, &[0u8; 32]),
         },
     );
 

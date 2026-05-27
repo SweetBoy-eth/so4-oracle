@@ -6,7 +6,10 @@ use crate::{
     keys::{
         claimable_fee_amount_key, limit_order_expiry_ledgers_key, market_order_expiry_ledgers_key,
         open_interest_long_key, open_interest_short_key, pool_long_amount_key, pool_short_amount_key,
+        position_fee_factor_key,
     },
+    referral_storage::ReferralStorageClient,
+    referral_utils::{apply_referral_rebates, compute_position_fee},
     liquidity_handler::LiquidityHandlerClient,
     role_store::{role_admin_id, RoleStoreClient},
     types::{Order, OrderError, OrderType, Position, PositionError, PositionProps},
@@ -28,6 +31,7 @@ enum OrderHandlerKey {
     Position(u32, Address, bool),
     SwapFeeFactor,
     PriceImpactFactor,
+    ReferralStorage,
 }
 
 pub fn order_keeper_role(env: &Env) -> BytesN<32> {
@@ -82,6 +86,14 @@ impl OrderHandler {
         caller.require_auth();
         Self::require_admin(&env, &caller);
         env.storage().instance().set(&OrderHandlerKey::PriceImpactFactor, &factor);
+    }
+
+    pub fn set_referral_storage(env: Env, caller: Address, referral_storage: Address) {
+        caller.require_auth();
+        Self::require_admin(&env, &caller);
+        env.storage()
+            .instance()
+            .set(&OrderHandlerKey::ReferralStorage, &referral_storage);
     }
 
     pub fn create_order(
@@ -304,6 +316,15 @@ impl OrderHandler {
             index_price,
         );
 
+        Self::charge_position_fee_with_referral(
+            &env,
+            &ds,
+            &writer,
+            &position,
+            size_delta_usd,
+            &collateral_token,
+        );
+
         if released_collateral > 0 {
             token::TokenClient::new(&env, &collateral_token).transfer(
                 &env.current_contract_address(),
@@ -340,6 +361,7 @@ impl OrderHandler {
         let ds = Self::data_store(&env);
         let contract_addr = env.current_contract_address();
 
+        let empty_code = BytesN::from_array(&env, &[0u8; 32]);
         let props = PositionProps {
             position_key: position_key.clone(),
             account: account.clone(),
@@ -349,6 +371,7 @@ impl OrderHandler {
             average_price,
             is_long,
             is_open: true,
+            referral_code: empty_code.clone(),
         };
 
         ds.set_position_props(&contract_addr, &position_key, &props);
@@ -451,6 +474,15 @@ impl OrderHandler {
             &mut position,
             order.size_delta_usd,
             index_price,
+        );
+
+        Self::charge_position_fee_with_referral(
+            env,
+            &ds,
+            &writer,
+            &position,
+            order.size_delta_usd,
+            &order.collateral_token,
         );
 
         if released_collateral > 0 {
@@ -588,5 +620,53 @@ impl OrderHandler {
             .get(&OrderHandlerKey::LiquidityHandler)
             .expect("not configured");
         LiquidityHandlerClient::new(env, &addr)
+    }
+
+    fn referral_storage(env: &Env) -> Option<ReferralStorageClient<'_>> {
+        env.storage()
+            .instance()
+            .get(&OrderHandlerKey::ReferralStorage)
+            .map(|addr| ReferralStorageClient::new(env, &addr))
+    }
+
+    fn charge_position_fee_with_referral(
+        env: &Env,
+        ds: &DataStoreClient,
+        writer: &Address,
+        position: &Position,
+        size_delta_usd: u128,
+        fee_token: &Address,
+    ) {
+        let fee_factor = ds
+            .get_u128(&position_fee_factor_key(env, position.market_id))
+            .unwrap_or(0);
+        let position_fee = compute_position_fee(size_delta_usd, fee_factor);
+        if position_fee == 0 {
+            return;
+        }
+
+        let net_fee = if let Some(rs) = Self::referral_storage(env) {
+            apply_referral_rebates(
+                env,
+                ds,
+                &rs,
+                writer,
+                &position.referral_code,
+                position_fee,
+                fee_token,
+            )
+        } else {
+            position_fee
+        };
+
+        env.events().publish(
+            ("position_fee",),
+            (
+                position.account.clone(),
+                position.market_id,
+                position_fee,
+                net_fee,
+            ),
+        );
     }
 }
