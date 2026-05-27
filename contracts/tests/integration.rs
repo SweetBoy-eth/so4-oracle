@@ -36,11 +36,11 @@ use soroban_sdk::{
 // ---------------------------------------------------------------------------
 
 fn make_key(env: &Env, seed: u8) -> BytesN<32> {
-    BytesN::from_array(env, &[seed; 32])
+    BytesN::from_array(&env, &[seed; 32])
 }
 
 fn admin_role(env: &Env) -> BytesN<32> {
-    BytesN::from_array(env, &[0u8; 32])
+    BytesN::from_array(&env, &[0u8; 32])
 }
 
 fn setup_role_store(env: &Env) -> (RoleStoreClient<'_>, Address) {
@@ -128,6 +128,7 @@ fn test_position_handler_is_liquidatable_uses_worst_case_pricing() {
         average_price: 10u128,
         is_long: true,
         is_open: true,
+    referral_code: soroban_sdk::BytesN::from_array(&env, &[0u8; 32]),
     };
     ds.set_position_props(&admin, &long_key, &long_position);
     assert!(!phc.is_liquidatable(&long_key), "position above threshold should not be liquidatable");
@@ -142,6 +143,7 @@ fn test_position_handler_is_liquidatable_uses_worst_case_pricing() {
         average_price: 10u128,
         is_long: false,
         is_open: true,
+    referral_code: soroban_sdk::BytesN::from_array(&env, &[0u8; 32]),
     };
     ds.set_position_props(&admin, &short_key, &short_position);
     assert!(phc.is_liquidatable(&short_key), "position below threshold should be liquidatable");
@@ -329,6 +331,7 @@ fn test_get_account_positions_paginates_and_filters_closed_positions() {
                 average_price: 0,
                 is_long: true,
                 is_open: true,
+            referral_code: soroban_sdk::BytesN::from_array(&env, &[0u8; 32]),
             },
         );
     }
@@ -346,6 +349,7 @@ fn test_get_account_positions_paginates_and_filters_closed_positions() {
             average_price: 0,
             is_long: true,
             is_open: false,
+        referral_code: soroban_sdk::BytesN::from_array(&env, &[0u8; 32]),
         },
     );
 
@@ -499,7 +503,7 @@ fn test_grant_multiple_roles_same_account() {
 // contract so that unit tests can exercise auth + event emission without
 // needing a compiled WASM artifact in the test registry.
 fn dummy_wasm_hash(env: &Env, seed: u8) -> BytesN<32> {
-    BytesN::from_array(env, &[seed; 32])
+    BytesN::from_array(&env, &[seed; 32])
 }
 
 // --- role_store upgrade ---
@@ -1469,6 +1473,7 @@ fn test_adl_rejected_when_position_not_profitable() {
             average_price: 10u128,
             is_long: true,
             is_open: true,
+        referral_code: soroban_sdk::BytesN::from_array(&env, &[0u8; 32]),
         },
     );
 
@@ -1526,6 +1531,7 @@ fn test_adl_rejected_when_pnl_factor_below_threshold() {
             average_price: 10u128,
             is_long: true,
             is_open: true,
+        referral_code: soroban_sdk::BytesN::from_array(&env, &[0u8; 32]),
         },
     );
     ds.add_position(&admin, &pos_key);
@@ -1586,6 +1592,7 @@ fn test_adl_full_close_reduces_pnl_factor() {
         average_price: 10u128,
         is_long: true,
         is_open: true,
+    referral_code: soroban_sdk::BytesN::from_array(&env, &[0u8; 32]),
     };
     ds.set_position_props(&admin, &pos_key, &pos);
     ds.add_position(&admin, &pos_key);
@@ -1646,6 +1653,7 @@ fn test_adl_partial_close_reduces_pnl_factor() {
         average_price: 10u128,
         is_long: true,
         is_open: true,
+    referral_code: soroban_sdk::BytesN::from_array(&env, &[0u8; 32]),
     };
     ds.set_position_props(&admin, &pos_key, &pos);
     ds.add_position(&admin, &pos_key);
@@ -1724,6 +1732,7 @@ fn test_adl_oi_imbalance_high_pnl_factor_adl_reduces_it() {
             average_price: 10u128,
             is_long: true,
             is_open: true,
+        referral_code: soroban_sdk::BytesN::from_array(&env, &[0u8; 32]),
         };
         ds.set_position_props(&admin, &pk, &pos);
         ds.add_position(&admin, &pk);
