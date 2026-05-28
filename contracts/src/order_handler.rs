@@ -283,6 +283,16 @@ impl OrderHandler {
         env.storage().persistent().get(&OrderHandlerKey::Order(key))
     }
 
+    /// Total number of orders ever created (used as the upper bound when an
+    /// off-chain consumer scans for account-scoped orders — see
+    /// `Reader::get_account_orders`, #71).
+    pub fn get_order_count(env: Env) -> u32 {
+        env.storage()
+            .instance()
+            .get(&OrderHandlerKey::OrderCount)
+            .unwrap_or(0)
+    }
+
     pub fn execute_adl(
         env: Env,
         caller: Address,

@@ -4,3 +4,11 @@ compatibility_date = "2026-05-12"
 
 [build]
 command = "cargo install -q \"worker-build@^0.8\" && cd oracle && worker-build --release --panic-unwind"
+
+# Scheduled price-update trigger — runs every minute.
+# Adjust the cron expression to match the desired update frequency, e.g.:
+#   "*/5 * * * *"  → every 5 minutes
+#   "*/30 * * * *" → every 30 minutes
+# Local testing: wrangler dev --test-scheduled
+[triggers]
+crons = ["*/1 * * * *"]

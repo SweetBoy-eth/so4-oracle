@@ -379,6 +379,12 @@ impl LiquidityHandler {
             .get(&LhKey::Withdrawal(withdrawal_id))
     }
 
+    /// Upper bound used by off-chain consumers / `Reader::get_account_withdrawals`
+    /// to know how many withdrawal ids to scan (#72).
+    pub fn get_withdrawal_count(env: Env) -> u32 {
+        env.storage().instance().get(&LhKey::WithdrawalCount).unwrap_or(0)
+    }
+
     pub fn market_tokens(env: Env, market_id: u32) -> MarketTokens {
         Self::market_tokens_internal(&env, market_id)
     }

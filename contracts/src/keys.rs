@@ -221,3 +221,46 @@ pub fn claimable_referral_amount_key(env: &Env, code_owner: &Address, token: &Ad
     buf[16..24].copy_from_slice(&token_bytes[..8]);
     BytesN::from_array(env, &buf)
 }
+
+/// Per-receiver / market / token UI fee claimable balance (#70).
+pub fn ui_claimable_fee_amount_key(
+    env: &Env,
+    receiver: &Address,
+    market_id: u32,
+    token: &Address,
+) -> BytesN<32> {
+    let mut buf = [0u8; 32];
+    buf[..8].copy_from_slice(b"uiclm_fe");
+    let r: [u8; 32] = env.crypto().sha256(&receiver.to_xdr(env)).to_array();
+    let t: [u8; 32] = env.crypto().sha256(&token.to_xdr(env)).to_array();
+    buf[8..16].copy_from_slice(&r[..8]);
+    buf[16..24].copy_from_slice(&t[..8]);
+    buf[24..28].copy_from_slice(&market_id.to_be_bytes());
+    BytesN::from_array(env, &buf)
+}
+
+/// Per-market / token claimable funding balance for an account (#67).
+pub fn claimable_funding_amount_key(
+    env: &Env,
+    market_id: u32,
+    token: &Address,
+    account: &Address,
+) -> BytesN<32> {
+    let mut buf = [0u8; 32];
+    buf[..8].copy_from_slice(b"clmfundf");
+    let t: [u8; 32] = env.crypto().sha256(&token.to_xdr(env)).to_array();
+    let a: [u8; 32] = env.crypto().sha256(&account.to_xdr(env)).to_array();
+    buf[8..12].copy_from_slice(&market_id.to_be_bytes());
+    buf[12..20].copy_from_slice(&t[..8]);
+    buf[20..28].copy_from_slice(&a[..8]);
+    BytesN::from_array(env, &buf)
+}
+
+/// Cumulative referrer statistics key (#69).
+pub fn referrer_stats_key(env: &Env, referrer: &Address) -> BytesN<32> {
+    let mut buf = [0u8; 32];
+    buf[..8].copy_from_slice(b"refstats");
+    let r: [u8; 32] = env.crypto().sha256(&referrer.to_xdr(env)).to_array();
+    buf[8..32].copy_from_slice(&r[..24]);
+    BytesN::from_array(env, &buf)
+}

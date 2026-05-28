@@ -4,6 +4,7 @@ pub mod adl_handler;
 pub mod config_handler;
 pub mod insurance_fund;
 pub mod data_store;
+pub mod fee_handler;
 pub mod decrease_position_utils;
 pub mod increase_position_utils;
 pub mod keys;

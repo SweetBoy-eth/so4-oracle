@@ -316,3 +316,44 @@ impl From<InsuranceFundError> for soroban_sdk::Error {
         soroban_sdk::Error::from_contract_error(e as u32)
     }
 }
+
+/// Snapshot of a market's funding state for off-chain consumers (#73).
+///
+/// Read from `funding_factor_key` and the open-interest keys; assembled by
+/// `Reader::get_funding_info`.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FundingInfo {
+    /// Signed funding factor per second; positive = longs pay shorts.
+    pub funding_factor_per_second: i128,
+    /// Current open interest on the long side, in USD (factor-scaled).
+    pub open_interest_long: u128,
+    /// Current open interest on the short side, in USD (factor-scaled).
+    pub open_interest_short: u128,
+    /// Total funding fees pending claim on the long side (per-token totals are
+    /// keyed by token; this is the protocol's aggregate, or 0 if not tracked
+    /// yet — see #67 for per-account claimable funding).
+    pub claimable_funding_long: u128,
+    /// Total funding fees pending claim on the short side.
+    pub claimable_funding_short: u128,
+}
+
+/// Snapshot of a market's open interest for off-chain consumers (#74).
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct OpenInterestInfo {
+    pub long_usd: u128,
+    pub short_usd: u128,
+    pub max_long_usd: u128,
+    pub max_short_usd: u128,
+}
+
+/// Cumulative referrer statistics (#69): aggregate volume, rebates earned and
+/// distinct traders referred. Updated on each referred trade.
+#[contracttype]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ReferrerStats {
+    pub total_referred_volume_usd: u128,
+    pub total_rebates_earned: u128,
+    pub total_traders_referred: u32,
+}

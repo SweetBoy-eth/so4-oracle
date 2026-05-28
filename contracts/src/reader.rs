@@ -259,6 +259,121 @@ impl Reader {
     }
 
     // -----------------------------------------------------------------------
+    // Funding view (#73)
+    // -----------------------------------------------------------------------
+
+    /// Snapshot of a market's funding state: signed funding factor per second
+    /// plus current open interest on each side. Returns zeros where storage
+    /// has not been written yet, so callers can render the panel before any
+    /// trading has occurred.
+    pub fn get_funding_info(env: Env, market_id: u32) -> FundingInfo {
+        let ds = Self::data_store(&env);
+        let funding_factor_per_second = ds
+            .get_i128(&funding_factor_key(&env, market_id))
+            .unwrap_or(0);
+        let open_interest_long = ds
+            .get_u128(&open_interest_long_key(&env, market_id))
+            .unwrap_or(0);
+        let open_interest_short = ds
+            .get_u128(&open_interest_short_key(&env, market_id))
+            .unwrap_or(0);
+        // Per-side aggregate claimable funding totals are not tracked at the
+        // protocol level today (claimable funding is keyed per account+token
+        // via #67's `claimable_funding_amount_key`). Surface 0 here so the
+        // struct shape matches the issue spec.
+        FundingInfo {
+            funding_factor_per_second,
+            open_interest_long,
+            open_interest_short,
+            claimable_funding_long: 0,
+            claimable_funding_short: 0,
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Order views (#71)
+    // -----------------------------------------------------------------------
+
+    /// Pending orders belonging to `account`, ordered by creation and
+    /// paginated with `start` (skip) and `limit` (max returned). Cancelled and
+    /// executed orders are automatically excluded — the underlying storage
+    /// removes them, so iterating returns only the pending set.
+    pub fn get_account_orders(
+        env: Env,
+        order_handler: Address,
+        account: Address,
+        start: u32,
+        limit: u32,
+    ) -> Vec<Order> {
+        let mut out = Vec::new(&env);
+        if limit == 0 {
+            return out;
+        }
+        let oh = OrderHandlerClient::new(&env, &order_handler);
+        let count = oh.get_order_count();
+        let mut skipped: u32 = 0;
+        for id in 0..count {
+            let Some(order) = oh.get_order(&id) else { continue };
+            if order.account != account {
+                continue;
+            }
+            if skipped < start {
+                skipped += 1;
+                continue;
+            }
+            out.push_back(order);
+            if out.len() >= limit {
+                break;
+            }
+        }
+        out
+    }
+
+    // -----------------------------------------------------------------------
+    // Withdrawal views (#72)
+    // -----------------------------------------------------------------------
+    //
+    // Pending withdrawals are persisted by the LiquidityHandler; deposits are
+    // executed atomically (LP shares are minted immediately) and have no
+    // pending record to surface — the matching `get_deposit` / account-deposit
+    // views are intentionally not implemented here, see the PR body for the
+    // storage change that would be required.
+
+    pub fn get_withdrawal(env: Env, withdrawal_id: u32) -> Option<Withdrawal> {
+        Self::liquidity_handler(&env).get_withdrawal(&withdrawal_id)
+    }
+
+    pub fn get_account_withdrawals(
+        env: Env,
+        account: Address,
+        start: u32,
+        limit: u32,
+    ) -> Vec<Withdrawal> {
+        let mut out = Vec::new(&env);
+        if limit == 0 {
+            return out;
+        }
+        let lh = Self::liquidity_handler(&env);
+        let count = lh.get_withdrawal_count();
+        let mut skipped: u32 = 0;
+        for id in 0..count {
+            let Some(w) = lh.get_withdrawal(&id) else { continue };
+            if w.account != account {
+                continue;
+            }
+            if skipped < start {
+                skipped += 1;
+                continue;
+            }
+            out.push_back(w);
+            if out.len() >= limit {
+                break;
+            }
+        }
+        out
+    }
+
+    // -----------------------------------------------------------------------
     // Internal helpers
     // -----------------------------------------------------------------------
 
