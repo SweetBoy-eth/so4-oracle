@@ -10,14 +10,16 @@ use crate::{
     },
     liquidity_handler::LiquidityHandlerClient,
     market_utils,
+    order_handler::OrderHandlerClient,
     position_utils::{
         calculate_pnl, get_position_fees, get_position_liquidation_price,
         get_position_pnl_usd,
     },
     pricing_utils::{get_execution_price as compute_execution_price, FACTOR_DENOMINATOR},
+    referral_storage::ReferralStorageClient,
     types::{
-        ExecutionPriceResult, FundingInfo, PositionFees, PositionInfo, PositionProps,
-        PoolValueInfo,
+        ExecutionPriceResult, FundingInfo, Order, PoolValueInfo, PositionFees, PositionInfo,
+        PositionFundingFactors, PositionProps, ReferrerStats, Withdrawal,
     },
 };
 
@@ -216,7 +218,7 @@ impl Reader {
             position_fee_factor,
         );
 
-        let funding_info = FundingInfo {
+        let funding_info = PositionFundingFactors {
             borrowing_factor,
             funding_factor,
             position_fee_factor,
@@ -371,6 +373,75 @@ impl Reader {
             }
         }
         out
+    }
+
+    // -----------------------------------------------------------------------
+    // Open interest views (#74)
+    // -----------------------------------------------------------------------
+
+    /// USD-valued open interest per side for `market_id`. The underlying
+    /// `open_interest_long_key` / `open_interest_short_key` slots are already
+    /// written in USD by the position pipeline (see `increase_position_utils`
+    /// where `size_delta_usd` is accumulated), so this view is a direct read.
+    pub fn get_open_interest(env: Env, market_id: u32) -> (u128, u128) {
+        let ds = Self::data_store(&env);
+        let long_oi = ds
+            .get_u128(&open_interest_long_key(&env, market_id))
+            .unwrap_or(0);
+        let short_oi = ds
+            .get_u128(&open_interest_short_key(&env, market_id))
+            .unwrap_or(0);
+        (long_oi, short_oi)
+    }
+
+    /// Open interest expressed in pool-token units (long_oi / long_price,
+    /// short_oi / short_price). Returns (0, 0) if oracle prices are unset for
+    /// the market, so the call never panics for an unconfigured market —
+    /// callers can render a blank panel before any trading has occurred.
+    pub fn get_open_interest_in_tokens(env: Env, market_id: u32) -> (u128, u128) {
+        let ds = Self::data_store(&env);
+        let lh = Self::liquidity_handler(&env);
+
+        let long_oi = ds
+            .get_u128(&open_interest_long_key(&env, market_id))
+            .unwrap_or(0);
+        let short_oi = ds
+            .get_u128(&open_interest_short_key(&env, market_id))
+            .unwrap_or(0);
+        // `oracle_prices` panics if no prices have been set — use the `try_*`
+        // variant so this view stays panic-free for unconfigured markets.
+        let prices = match lh.try_oracle_prices(&market_id) {
+            Ok(Ok(p)) => p,
+            _ => return (0, 0),
+        };
+        let long_in_tokens = if prices.long_price == 0 {
+            0
+        } else {
+            long_oi / prices.long_price
+        };
+        let short_in_tokens = if prices.short_price == 0 {
+            0
+        } else {
+            short_oi / prices.short_price
+        };
+        (long_in_tokens, short_in_tokens)
+    }
+
+    // -----------------------------------------------------------------------
+    // Referral stats view (#69)
+    // -----------------------------------------------------------------------
+
+    /// Returns the cumulative stats tracked by `ReferralStorage` for a
+    /// referrer. Zero-stats are returned if the referrer has never been
+    /// recorded — same shape and semantics as
+    /// `ReferralStorage::get_referrer_stats`, exposed here so UIs can hit a
+    /// single read contract.
+    pub fn get_referrer_stats(
+        env: Env,
+        referral_storage: Address,
+        referrer: Address,
+    ) -> ReferrerStats {
+        ReferralStorageClient::new(&env, &referral_storage).get_referrer_stats(&referrer)
     }
 
     // -----------------------------------------------------------------------

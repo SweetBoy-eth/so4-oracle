@@ -264,3 +264,20 @@ pub fn referrer_stats_key(env: &Env, referrer: &Address) -> BytesN<32> {
     buf[8..32].copy_from_slice(&r[..24]);
     BytesN::from_array(env, &buf)
 }
+
+// ---------------------------------------------------------------------------
+// Fee handler key generators (#66)
+// ---------------------------------------------------------------------------
+
+/// Protocol-fee accumulator per market+token. Distinct from
+/// `claimable_fee_amount_key` (swap fees, market-only) — this is the slot the
+/// new `FeeHandler::claim_fees` entry point reads, scoped by token because
+/// post-#66 markets may accrue fees in multiple denominations.
+pub fn claimable_protocol_fee_key(env: &Env, market_id: u32, token: &Address) -> BytesN<32> {
+    let mut buf = [0u8; 32];
+    buf[..8].copy_from_slice(b"clmpr_fe");
+    buf[8..12].copy_from_slice(&market_id.to_be_bytes());
+    let token_bytes: [u8; 32] = env.crypto().sha256(&token.to_xdr(env)).to_array();
+    buf[12..32].copy_from_slice(&token_bytes[..20]);
+    BytesN::from_array(env, &buf)
+}

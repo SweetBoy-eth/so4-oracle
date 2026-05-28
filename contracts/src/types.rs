@@ -107,9 +107,13 @@ pub struct PositionFees {
     pub total_fee: u128,
 }
 
+/// Three rate factors read alongside a position for the `get_position_info`
+/// view. Renamed from `FundingInfo` to avoid a name collision with the public
+/// `FundingInfo` (#73, below) — they describe different things: this is the
+/// position's fee/factor bundle, that is the market's funding state.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct FundingInfo {
+pub struct PositionFundingFactors {
     pub borrowing_factor: u128,
     pub funding_factor: u128,
     pub position_fee_factor: u128,
@@ -122,7 +126,7 @@ pub struct PositionInfo {
     pub pnl_usd: i128,
     pub pending_fees: PositionFees,
     pub liquidation_price: u128,
-    pub funding_info: FundingInfo,
+    pub funding_info: PositionFundingFactors,
 }
 
 #[contracttype]

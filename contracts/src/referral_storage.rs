@@ -2,7 +2,7 @@ use soroban_sdk::{contract, contractimpl, contracttype, panic_with_error, Addres
 
 use crate::{
     role_store::{role_admin_id, RoleStoreClient},
-    types::{ReferralError, TierConfig},
+    types::{ReferralError, ReferrerStats, TierConfig},
 };
 
 #[contract]
@@ -13,6 +13,11 @@ enum ReferralStorageKey {
     RoleStore,
     CodeOwner(BytesN<32>),
     Tier(Address),
+    /// Per-referrer cumulative stats (#69).
+    Stats(Address),
+    /// Set of traders that have ever traded under a given referrer's code,
+    /// used to deduplicate the `total_traders` counter.
+    SeenTrader(Address, Address),
 }
 
 #[contractimpl]
@@ -67,6 +72,61 @@ impl ReferralStorage {
                 rebate_bps: 0,
                 discount_bps: 0,
             })
+    }
+
+    // -----------------------------------------------------------------------
+    // Referrer stats (#69)
+    // -----------------------------------------------------------------------
+
+    /// Record a referred trade for `referrer`. Increments cumulative volume
+    /// and rebates, and the unique-trader counter the first time `trader` is
+    /// seen under this referrer.
+    ///
+    /// Admin-gated: only the trusted increment path (the order pipeline)
+    /// should be allowed to write here, so untrusted callers can't inflate
+    /// referrer rankings. The order pipeline's caller (or a keeper acting on
+    /// its behalf) must hold ROLE_ADMIN.
+    pub fn record_referred_trade(
+        env: Env,
+        caller: Address,
+        referrer: Address,
+        trader: Address,
+        volume_usd: u128,
+        rebate: u128,
+    ) {
+        caller.require_auth();
+        Self::require_admin(&env, &caller);
+
+        let mut stats: ReferrerStats = env
+            .storage()
+            .persistent()
+            .get(&ReferralStorageKey::Stats(referrer.clone()))
+            .unwrap_or_default();
+
+        stats.total_referred_volume_usd =
+            stats.total_referred_volume_usd.saturating_add(volume_usd);
+        stats.total_rebates_earned = stats.total_rebates_earned.saturating_add(rebate);
+
+        // Distinct trader: only bump the counter the first time we see this
+        // (referrer, trader) pair.
+        let seen_key = ReferralStorageKey::SeenTrader(referrer.clone(), trader);
+        if !env.storage().persistent().has(&seen_key) {
+            env.storage().persistent().set(&seen_key, &true);
+            stats.total_traders_referred = stats.total_traders_referred.saturating_add(1);
+        }
+
+        env.storage()
+            .persistent()
+            .set(&ReferralStorageKey::Stats(referrer), &stats);
+    }
+
+    /// Read the cumulative stats for a referrer. Returns the zero-stats
+    /// struct if the referrer has never been recorded.
+    pub fn get_referrer_stats(env: Env, referrer: Address) -> ReferrerStats {
+        env.storage()
+            .persistent()
+            .get(&ReferralStorageKey::Stats(referrer))
+            .unwrap_or_default()
     }
 
     fn require_admin(env: &Env, caller: &Address) {
