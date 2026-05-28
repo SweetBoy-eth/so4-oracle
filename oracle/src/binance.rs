@@ -59,7 +59,7 @@ pub fn parse_ticker_http_result(
 pub async fn fetch_spot_prices(symbols: &[String]) -> Result<Vec<(String, i128)>, BinancePriceError> {
     let binance_url = Url::parse(BINANCE_TICKER_PRICE_URL)
         .map_err(|err| BinancePriceError::NetworkError(err.to_string()))?;
-    let response = Fetch::Url(binance_url)
+    let mut response = Fetch::Url(binance_url)
         .send()
         .await
         .map_err(|err| BinancePriceError::NetworkError(err.to_string()))?;
