@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use worker::Fetch;
+use worker::{Fetch, Url};
 
 pub const BINANCE_TICKER_PRICE_URL: &str = "https://api.binance.com/api/v3/ticker/price";
 pub const FLOAT_PRECISION: i128 = 1_000_000_000_000_000_000_000_000_000_000;
@@ -57,7 +57,9 @@ pub fn parse_ticker_http_result(
 }
 
 pub async fn fetch_spot_prices(symbols: &[String]) -> Result<Vec<(String, i128)>, BinancePriceError> {
-    let response = Fetch::Url(BINANCE_TICKER_PRICE_URL)
+    let binance_url = Url::parse(BINANCE_TICKER_PRICE_URL)
+        .map_err(|err| BinancePriceError::NetworkError(err.to_string()))?;
+    let response = Fetch::Url(binance_url)
         .send()
         .await
         .map_err(|err| BinancePriceError::NetworkError(err.to_string()))?;
