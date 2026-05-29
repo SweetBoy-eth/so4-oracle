@@ -4,15 +4,47 @@ use crate::history::{HistoryStore, Interval};
 use crate::state::{AppState, MarketSummary, Reader, ReaderError};
 use axum::{
     extract::{Path, Query},
-    http::StatusCode,
-    response::IntoResponse,
+    http::{header, HeaderValue, Method, StatusCode},
+    response::{Html, IntoResponse},
     routing::get,
     Extension, Json, Router,
 };
 use futures::future::join_all;
 use serde::{Deserialize, Serialize};
+use std::env;
 use std::sync::Arc;
 use std::time::Duration;
+use tower_http::cors::{AllowOrigin, CorsLayer};
+use tower_http::trace::TraceLayer;
+use tracing::{info, warn};
+use utoipa::OpenApi;
+
+/// OpenAPI 3 document (issue #108).
+///
+/// utoipa derives the spec from `#[utoipa::path]` annotations on the
+/// handler functions plus the `components.schemas` listed here. The
+/// resulting JSON is served from `GET /openapi.json` and the Swagger UI
+/// is mounted under `GET /docs` by `mount_openapi_routes` below.
+#[derive(OpenApi)]
+#[openapi(
+    info(
+        title = "so4-oracle APIs",
+        version = env!("CARGO_PKG_VERSION"),
+        description = "Read-only API surface exposed by the SO4 oracle worker."
+    ),
+    paths(health, get_price, get_price_history),
+    components(schemas(HealthDoc, PriceResp))
+)]
+pub struct ApiDoc;
+
+/// Schema-only struct so `/health` shows up in the OpenAPI spec — the
+/// handler returns `serde_json::Value` directly, which utoipa cannot
+/// derive a schema from.
+#[derive(Serialize, utoipa::ToSchema)]
+#[allow(dead_code)]
+struct HealthDoc {
+    status: String,
+}
 
 pub async fn run() -> Result<(), anyhow::Error> {
     let cache = Cache::new();
@@ -44,15 +76,190 @@ pub async fn run() -> Result<(), anyhow::Error> {
         .route("/prices/:token/history", get(get_price_history))
         .route("/markets", get(get_markets))
         .route("/markets/:market_id", get(get_market))
-        .route("/positions/:account", get(get_positions))
+        .route("/positions/:account", get(get_positions));
+
+    // OpenAPI (issue #108): mount `/openapi.json` and the Swagger UI at
+    // `/docs`. Done before applying layers so the static-asset routes
+    // inherit the same trace and CORS configuration.
+    let app = mount_openapi_routes(app);
+
+    // CORS (issue #105), tracing middleware (issue #106), and shared
+    // state are layered after the routes so they apply to every endpoint
+    // including the OpenAPI surface.
+    let app = app
+        .layer(build_cors_layer())
+        .layer(TraceLayer::new_for_http())
         .layer(Extension(Arc::new(state)));
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await?;
-    println!("listening on {}", listener.local_addr()?);
-    axum::serve(listener, app).await?;
+    info!("listening on {}", listener.local_addr()?);
+
+    // Graceful shutdown (issue #107): on SIGTERM/SIGINT we stop
+    // accepting new connections and let in-flight requests finish.
+    // The hard cap is 30 seconds — past that, a watchdog task forces
+    // the process to exit so deployment orchestrators (Kubernetes,
+    // Docker, systemd) don't have to send SIGKILL themselves.
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async {
+            shutdown_signal().await;
+            // Once the signal fires, arm the force-exit watchdog. The
+            // watchdog is spawned (not awaited) so the returned future
+            // resolves immediately and tells axum to start draining.
+            tokio::spawn(async {
+                tokio::time::sleep(Duration::from_secs(30)).await;
+                warn!("shutdown: 30s drain timeout exceeded, forcing exit");
+                std::process::exit(0);
+            });
+        })
+        .await?;
+    info!("server stopped cleanly");
     Ok(())
 }
 
+/// Mount the OpenAPI JSON endpoint and a minimal Swagger UI under `/docs`.
+///
+/// Rather than pull in the heavy `utoipa-swagger-ui` crate (which had
+/// transitive `arbitrary` version conflicts against the Stellar SDK in
+/// this workspace), `/docs` is a tiny HTML page that loads the Swagger UI
+/// bundle from the official CDN and points it at our own
+/// `/openapi.json`. Same UX, zero extra dependencies.
+fn mount_openapi_routes(app: Router) -> Router {
+    app.route("/openapi.json", get(serve_openapi))
+        .route("/docs", get(serve_swagger_ui))
+}
+
+async fn serve_openapi() -> impl IntoResponse {
+    let body = ApiDoc::openapi()
+        .to_json()
+        .unwrap_or_else(|_| "{}".to_string());
+    (
+        [(header::CONTENT_TYPE, "application/json")],
+        body,
+    )
+}
+
+async fn serve_swagger_ui() -> Html<&'static str> {
+    Html(SWAGGER_UI_HTML)
+}
+
+const SWAGGER_UI_HTML: &str = r##"<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>so4-oracle APIs</title>
+    <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+  </head>
+  <body>
+    <div id="swagger-ui"></div>
+    <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" crossorigin></script>
+    <script>
+      window.ui = SwaggerUIBundle({
+        url: "/openapi.json",
+        dom_id: "#swagger-ui",
+        presets: [SwaggerUIBundle.presets.apis],
+        layout: "BaseLayout",
+      });
+    </script>
+  </body>
+</html>
+"##;
+
+/// CORS configuration (issue #105).
+///
+/// In development (`APP_ENV != "production"` and no explicit
+/// `CORS_ALLOWED_ORIGINS`) we fall back to a permissive any-origin
+/// policy so local frontends just work. In production we require
+/// `CORS_ALLOWED_ORIGINS` (comma-separated) and reject the request if
+/// none parse cleanly — the layer simply omits the
+/// `Access-Control-Allow-Origin` header for non-matching origins,
+/// which browsers translate into a CORS error.
+fn build_cors_layer() -> CorsLayer {
+    let allowed = env::var("CORS_ALLOWED_ORIGINS").unwrap_or_default();
+    let is_production =
+        env::var("APP_ENV").unwrap_or_default().eq_ignore_ascii_case("production");
+
+    let methods = [
+        Method::GET,
+        Method::POST,
+        Method::PUT,
+        Method::PATCH,
+        Method::DELETE,
+        Method::OPTIONS,
+    ];
+    let headers = [
+        header::AUTHORIZATION,
+        header::ACCEPT,
+        header::CONTENT_TYPE,
+    ];
+
+    let base = CorsLayer::new()
+        .allow_methods(methods)
+        .allow_headers(headers)
+        .max_age(Duration::from_secs(3600));
+
+    if allowed.trim().is_empty() {
+        if is_production {
+            warn!(
+                "CORS_ALLOWED_ORIGINS is empty in production — no origin will be allowed. Set CORS_ALLOWED_ORIGINS=https://frontend.example.com,…"
+            );
+            return base.allow_origin(AllowOrigin::list(Vec::new()));
+        }
+        info!("CORS: dev mode — allowing any origin (set CORS_ALLOWED_ORIGINS to restrict)");
+        return base.allow_origin(tower_http::cors::Any);
+    }
+
+    let origins: Vec<HeaderValue> = allowed
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| s.parse::<HeaderValue>().ok())
+        .collect();
+
+    info!(
+        count = origins.len(),
+        "CORS: allowing {} origin(s) from CORS_ALLOWED_ORIGINS",
+        origins.len()
+    );
+    base.allow_origin(AllowOrigin::list(origins))
+}
+
+/// Future that resolves on the first SIGTERM (Unix) or Ctrl-C
+/// (cross-platform). Used by `axum::serve(...).with_graceful_shutdown(...)`
+/// to start tearing the server down. See issue #107.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        if let Err(err) = tokio::signal::ctrl_c().await {
+            warn!("failed to install Ctrl-C handler: {err}");
+        }
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+            Ok(mut sigterm) => {
+                sigterm.recv().await;
+            }
+            Err(err) => warn!("failed to install SIGTERM handler: {err}"),
+        }
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => info!("shutdown: Ctrl-C received, draining in-flight requests"),
+        _ = terminate => info!("shutdown: SIGTERM received, draining in-flight requests"),
+    }
+}
+
+#[utoipa::path(
+    get,
+    path = "/health",
+    responses(
+        (status = 200, description = "Service is up", body = HealthDoc)
+    )
+)]
 async fn health() -> Json<serde_json::Value> {
     Json(serde_json::json!({"status":"ok"}))
 }
@@ -69,6 +276,21 @@ struct HistoryQuery {
     to: Option<u64>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/prices/{token}/history",
+    params(
+        ("token" = String, Path, description = "Token symbol (case-insensitive)"),
+        ("interval" = Option<String>, Query, description = "Candle interval: 1m, 5m, 1h"),
+        ("from" = Option<u64>, Query, description = "Unix timestamp range start (default: now − 24h)"),
+        ("to" = Option<u64>, Query, description = "Unix timestamp range end (default: now)"),
+    ),
+    responses(
+        (status = 200, description = "OHLCV candles for the token"),
+        (status = 400, description = "Invalid interval or `from` > `to`"),
+        (status = 404, description = "No history recorded for this token"),
+    )
+)]
 pub async fn get_price_history(
     Path(token): Path<String>,
     Query(params): Query<HistoryQuery>,
@@ -118,7 +340,7 @@ pub async fn get_price_history(
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 struct PriceResp {
     token: String,
     symbol: String,
@@ -128,6 +350,17 @@ struct PriceResp {
     sources_used: Vec<String>,
 }
 
+#[utoipa::path(
+    get,
+    path = "/prices/{token}",
+    params(
+        ("token" = String, Path, description = "Token symbol (case-insensitive)")
+    ),
+    responses(
+        (status = 200, description = "Latest min/max price for the token", body = PriceResp),
+        (status = 404, description = "Token not in the configured feed"),
+    )
+)]
 pub async fn get_price(
     Path(token): Path<String>,
     Extension(_state): Extension<Arc<AppState>>,
