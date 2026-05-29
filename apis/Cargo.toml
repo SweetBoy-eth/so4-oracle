@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 authors = ["ibrahimijai <sunday.m1701072@st.futminna.edu.ng>"]
 
+[lints]
+workspace = true
+
 [[bin]]
 name = "apis"
 path = "src/main.rs"

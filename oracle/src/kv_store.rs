@@ -147,7 +147,10 @@ pub async fn store_last_submitted_price(
     Ok(())
 }
 
-pub async fn get_last_submitted_price(env: &Env, token_symbol: &str) -> Result<Option<i128>, String> {
+pub async fn get_last_submitted_price(
+    env: &Env,
+    token_symbol: &str,
+) -> Result<Option<i128>, String> {
     let kv = env
         .kv("ORACLE_KV")
         .map_err(|e| format!("failed to get KV namespace: {}", e))?;
@@ -165,10 +168,7 @@ pub async fn get_last_submitted_price(env: &Env, token_symbol: &str) -> Result<O
     }
 }
 
-pub async fn store_cached_prices(
-    env: &Env,
-    prices: &[crate::CachedPrice],
-) -> Result<(), String> {
+pub async fn store_cached_prices(env: &Env, prices: &[crate::CachedPrice]) -> Result<(), String> {
     let kv = env
         .kv("ORACLE_KV")
         .map_err(|e| format!("failed to get KV namespace: {}", e))?;

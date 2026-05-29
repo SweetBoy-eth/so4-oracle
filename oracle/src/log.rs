@@ -10,7 +10,10 @@ pub fn log_json(level: &str, message: &str, context: serde_json::Value) {
     });
 
     let log_str = serde_json::to_string(&log_entry).unwrap_or_else(|_| {
-        format!(r#"{{"level":"error","timestamp":{},"message":"log serialization failed"}}"#, current_timestamp())
+        format!(
+            r#"{{"level":"error","timestamp":{},"message":"log serialization failed"}}"#,
+            current_timestamp()
+        )
     });
 
     console_log!("{}", log_str);

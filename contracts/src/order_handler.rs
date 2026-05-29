@@ -15,7 +15,7 @@ use crate::{
     referral_storage::ReferralStorageClient,
     referral_utils::{apply_referral_rebates, compute_position_fee},
     role_store::{role_admin_id, RoleStoreClient},
-    types::{Order, OrderError, OrderType, Position, PositionError, PositionProps, PriceError},
+    types::{Order, OrderError, OrderType, Position, PositionError, PositionProps},
 };
 
 const FACTOR_DENOMINATOR: u128 = 1_000_000;
@@ -347,7 +347,8 @@ impl OrderHandler {
             .unwrap_or(0)
     }
 
-    pub fn execute_adl(
+    /// ADL decrease routed through the order handler (distinct from `AdlHandler::execute_adl`).
+    pub fn execute_order_adl(
         env: Env,
         caller: Address,
         account: Address,

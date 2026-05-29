@@ -115,7 +115,7 @@ fn test_execute_adl_partial_then_full_close() {
         },
     );
 
-    oh(&s).execute_adl(&s.adl_handler, &s.user, &MARKET, &s.long, &true, &4_000u128);
+    oh(&s).execute_order_adl(&s.adl_handler, &s.user, &MARKET, &s.long, &true, &4_000u128);
 
     let position = oh(&s).get_position(&s.user, &MARKET, &true).unwrap();
     assert_eq!(position.size_in_usd, 6_000);
@@ -123,7 +123,7 @@ fn test_execute_adl_partial_then_full_close() {
     assert_eq!(position.size_in_tokens, 3_000);
     assert_eq!(TokenClient::new(&s.env, &s.long).balance(&s.user), 400);
 
-    oh(&s).execute_adl(&s.adl_handler, &s.user, &MARKET, &s.long, &true, &6_000u128);
+    oh(&s).execute_order_adl(&s.adl_handler, &s.user, &MARKET, &s.long, &true, &6_000u128);
     assert_eq!(oh(&s).get_position(&s.user, &MARKET, &true), None);
     assert_eq!(TokenClient::new(&s.env, &s.long).balance(&s.user), 1_000);
 }

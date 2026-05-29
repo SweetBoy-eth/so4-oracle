@@ -119,7 +119,10 @@ async fn scheduled(_event: ScheduledEvent, env: Env, _ctx: ScheduleContext) -> R
         }
     };
 
-    log::info("cycle_start", json!({"network": format!("{:?}", net_cfg.network)}));
+    log::info(
+        "cycle_start",
+        json!({"network": format!("{:?}", net_cfg.network)}),
+    );
 
     // 3. Check keeper balance.
     let horizon_url = default_horizon_url(&net_cfg.network);
@@ -287,8 +290,9 @@ async fn scheduled(_event: ScheduledEvent, env: Env, _ctx: ScheduleContext) -> R
             }
 
             // 6a. Filter outliers > 3σ from median
-            let filter_result = prices::filter_outliers(&token_prices.prices, &token_prices.sources);
-            
+            let filter_result =
+                prices::filter_outliers(&token_prices.prices, &token_prices.sources);
+
             for (src, price, dev) in &filter_result.rejected {
                 log::error(
                     "outlier_rejected",
@@ -297,7 +301,10 @@ async fn scheduled(_event: ScheduledEvent, env: Env, _ctx: ScheduleContext) -> R
             }
 
             if filter_result.filtered_prices.is_empty() {
-                log::error("all_sources_rejected_as_outliers", json!({"token": token.symbol.clone()}));
+                log::error(
+                    "all_sources_rejected_as_outliers",
+                    json!({"token": token.symbol.clone()}),
+                );
                 continue;
             }
 
@@ -330,8 +337,7 @@ async fn scheduled(_event: ScheduledEvent, env: Env, _ctx: ScheduleContext) -> R
             };
 
             if !blocked {
-                let _ =
-                    kv_store::store_last_submitted_price(&env, &token.symbol, median).await;
+                let _ = kv_store::store_last_submitted_price(&env, &token.symbol, median).await;
                 let timestamp = current_timestamp_secs();
                 cached_prices.push(CachedPrice {
                     token: token.stellar_address.clone(),

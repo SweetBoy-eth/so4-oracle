@@ -138,7 +138,7 @@ fn test_reader_get_referrer_stats_passthrough() {
     fx.rs
         .record_referred_trade(&fx.admin, &referrer, &t2, &90u128, &9u128);
 
-    let s = fx.reader.get_referrer_stats(&fx.rs_id, &referrer);
+    let s = fx.reader.read_referrer_stats(&fx.rs_id, &referrer);
     assert_eq!(s.total_referred_volume_usd, 100u128);
     assert_eq!(s.total_rebates_earned, 10u128);
     assert_eq!(s.total_traders_referred, 2u32);

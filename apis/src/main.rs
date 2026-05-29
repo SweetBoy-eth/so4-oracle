@@ -65,10 +65,7 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 }
 
 /// Middleware that enforces `Authorization: Bearer <API_KEY>` on `/admin` routes.
-async fn admin_auth(
-    request: Request<axum::body::Body>,
-    next: Next,
-) -> Response {
+async fn admin_auth(request: Request<axum::body::Body>, next: Next) -> Response {
     let path = request.uri().path().to_owned();
 
     // Only protect /admin routes
@@ -79,7 +76,9 @@ async fn admin_auth(
             return Response::builder()
                 .status(StatusCode::UNAUTHORIZED)
                 .header(header::WWW_AUTHENTICATE, "Bearer")
-                .body(axum::body::Body::from(r#"{"error":"API key not configured"}"#))
+                .body(axum::body::Body::from(
+                    r#"{"error":"API key not configured"}"#,
+                ))
                 .unwrap();
         }
 
@@ -103,7 +102,9 @@ async fn admin_auth(
             return Response::builder()
                 .status(StatusCode::UNAUTHORIZED)
                 .header(header::WWW_AUTHENTICATE, "Bearer")
-                .body(axum::body::Body::from(r#"{"error":"invalid or missing API key"}"#))
+                .body(axum::body::Body::from(
+                    r#"{"error":"invalid or missing API key"}"#,
+                ))
                 .unwrap();
         }
     }
@@ -160,7 +161,10 @@ async fn update_oracle_status(
 pub fn app(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
-        .route("/oracle/status", get(oracle_status).post(update_oracle_status))
+        .route(
+            "/oracle/status",
+            get(oracle_status).post(update_oracle_status),
+        )
         .route("/admin/hello", get(|| async { "admin ok" }))
         .layer(middleware::from_fn(admin_auth))
         .with_state(state)

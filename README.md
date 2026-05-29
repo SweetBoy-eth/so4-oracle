@@ -12,14 +12,15 @@ This workspace feeds signed prices into the on-chain `oracle` contract and expos
 so4-oracle/
 ├── Cargo.toml          # Workspace manifest
 ├── wrangler.toml       # Cloudflare Worker deployment config
+├── docker-compose.yml  # Local dev stack (Stellar + Redis + APIs)
+├── Makefile            # make dev / deploy-local / test
+├── scripts/
+│   ├── deploy_testnet.sh
+│   └── build_contracts.sh
 │
+├── contracts/          # Soroban smart contracts
 ├── oracle/             # Cloudflare Worker — keeper price submission
-│   ├── Cargo.toml
-│   └── src/lib.rs
-│
-└── apis/               # Native Axum server — REST + WebSocket API
-    ├── Cargo.toml
-    └── src/main.rs
+└── apis/               # Native Axum server — REST API
 ```
 
 ---
@@ -95,6 +96,53 @@ cargo run -p apis
 
 # Deploy the oracle worker to Cloudflare
 wrangler deploy
+```
+
+---
+
+## Contract Deployment (Testnet)
+
+Deploy all SO4 contracts to Stellar testnet and write addresses to `.env.testnet`:
+
+```bash
+# Prerequisites: stellar CLI, funded testnet identity
+stellar keys add deployer --network testnet
+
+# Build WASM (or set CONTRACTS_WASM to a pre-built artifact)
+./scripts/build_contracts.sh
+
+# Deploy (idempotent — skips already-deployed contracts)
+DEPLOYER=deployer ./scripts/deploy_testnet.sh
+```
+
+The script deploys contracts in dependency order, initialises cross-contract references, creates a test market, and writes all addresses to `.env.testnet`.
+
+---
+
+## Local Development (Docker)
+
+Spin up a local Stellar Quickstart node, Redis, and the APIs server:
+
+```bash
+make dev          # start all services (Stellar :8000, Redis :6379, APIs :3000)
+make deploy-local # deploy contracts to the local node
+make test         # run all workspace tests
+make down         # stop services
+```
+
+Services:
+- **Stellar Quickstart** — testnet Soroban RPC at `http://localhost:8000/soroban/rpc`
+- **Redis** — cache backend at `redis://localhost:6379`
+- **APIs** — REST server at `http://localhost:3000`
+
+---
+
+## Testing
+
+```bash
+cargo test --all                    # full workspace
+cargo test -p contracts             # Soroban contract tests
+cargo test -p contracts --test e2e_full_flow  # end-to-end flow (#112)
 ```
 
 ---

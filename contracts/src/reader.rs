@@ -161,7 +161,7 @@ impl Reader {
         let ds = Self::data_store(&env);
         let lh = Self::liquidity_handler(&env);
 
-        let mut pos: PositionProps = ds
+        let pos: PositionProps = ds
             .get_position_props(&position_key)
             .expect("position not found");
 
@@ -340,7 +340,7 @@ impl Reader {
     // views are intentionally not implemented here, see the PR body for the
     // storage change that would be required.
 
-    pub fn get_withdrawal(env: Env, withdrawal_id: u32) -> Option<Withdrawal> {
+    pub fn read_withdrawal(env: Env, withdrawal_id: u32) -> Option<Withdrawal> {
         Self::liquidity_handler(&env).get_withdrawal(&withdrawal_id)
     }
 
@@ -437,7 +437,7 @@ impl Reader {
     /// recorded — same shape and semantics as
     /// `ReferralStorage::get_referrer_stats`, exposed here so UIs can hit a
     /// single read contract.
-    pub fn get_referrer_stats(
+    pub fn read_referrer_stats(
         env: Env,
         referral_storage: Address,
         referrer: Address,

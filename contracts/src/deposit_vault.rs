@@ -87,7 +87,7 @@ impl DepositVault {
         deposit_id
     }
 
-    pub fn execute_deposit(env: Env, caller: Address, deposit_id: u32, oracle_price: u128) {
+    pub fn execute_vault_deposit(env: Env, caller: Address, deposit_id: u32, oracle_price: u128) {
         caller.require_auth();
         Self::require_controller(&env, &caller);
 

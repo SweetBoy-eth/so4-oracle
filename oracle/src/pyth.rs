@@ -65,8 +65,8 @@ pub fn normalize_pyth_price(price_str: &str, exponent: i32) -> Result<i128, Pyth
 
 pub async fn fetch_pyth_price(feed_id: &str) -> Result<i128, PythPriceError> {
     let url_string = format!("{}?ids[]={}", PYTH_HERMES_URL, feed_id);
-    let url = Url::parse(&url_string)
-        .map_err(|err| PythPriceError::NetworkError(err.to_string()))?;
+    let url =
+        Url::parse(&url_string).map_err(|err| PythPriceError::NetworkError(err.to_string()))?;
 
     let mut response = Fetch::Url(url)
         .send()

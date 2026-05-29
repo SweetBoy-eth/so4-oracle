@@ -145,7 +145,7 @@ fn test_get_withdrawal_via_reader_round_trip() {
 
     let w = fx
         .reader
-        .get_withdrawal(&wid)
+        .read_withdrawal(&wid)
         .expect("reader should see the pending withdrawal");
     assert_eq!(w.account, user);
     assert_eq!(w.market_id, market_id);
@@ -158,7 +158,7 @@ fn test_get_withdrawal_missing_returns_none() {
     let env = Env::default();
     let fx = setup(&env);
     // No withdrawals have ever been created — id 9999 must be None, not panic.
-    assert!(fx.reader.get_withdrawal(&9_999u32).is_none());
+    assert!(fx.reader.read_withdrawal(&9_999u32).is_none());
 }
 
 #[test]

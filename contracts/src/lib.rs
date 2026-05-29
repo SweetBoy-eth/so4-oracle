@@ -1,4 +1,13 @@
 #![no_std]
+#![allow(
+    mismatched_lifetime_syntaxes,
+    clippy::too_many_arguments,
+    clippy::cast_lossless,
+    clippy::needless_borrow,
+    clippy::doc_overindented_list_items,
+    clippy::unnecessary_cast,
+    clippy::needless_return
+)]
 
 pub mod adl_handler;
 pub mod config_handler;

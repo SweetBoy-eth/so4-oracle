@@ -1,11 +1,13 @@
 use crate::cache::Cache;
 use crate::config::lookup_token;
 use crate::state::{AppState, MarketSummary, Reader, ReaderError};
-use axum::{extract::Path, http::StatusCode, response::IntoResponse, Json, Router, routing::get, Extension};
-use serde::{Deserialize, Serialize};
+use axum::{
+    extract::Path, http::StatusCode, response::IntoResponse, routing::get, Extension, Json, Router,
+};
+use futures::future::join_all;
+use serde::Serialize;
 use std::sync::Arc;
 use std::time::Duration;
-use futures::future::join_all;
 
 pub async fn run() -> Result<(), anyhow::Error> {
     let cache = Cache::new();
@@ -40,7 +42,10 @@ struct PriceResp {
     sources_used: Vec<String>,
 }
 
-pub async fn get_price(Path(token): Path<String>, Extension(state): Extension<Arc<AppState>>) -> impl IntoResponse {
+pub async fn get_price(
+    Path(token): Path<String>,
+    Extension(_state): Extension<Arc<AppState>>,
+) -> impl IntoResponse {
     let key = token.to_lowercase();
     if let Some(entry) = lookup_token(&key) {
         let resp = PriceResp {
@@ -51,24 +56,30 @@ pub async fn get_price(Path(token): Path<String>, Extension(state): Extension<Ar
             timestamp: chrono::Utc::now().timestamp(),
             sources_used: entry.sources_used.clone(),
         };
-        return (StatusCode::OK, Json(resp));
+        return (StatusCode::OK, Json(resp)).into_response();
     }
     (
         StatusCode::NOT_FOUND,
         Json(serde_json::json!({"error":"token not found in feed"})),
     )
+        .into_response()
 }
 
 pub async fn get_markets(Extension(state): Extension<Arc<AppState>>) -> impl IntoResponse {
     // cache key
     let cache_key = "markets_list";
-    if let Some(cached): Option<Vec<MarketSummary>> = state.cache.get(cache_key).await {
+    if let Some(cached) = state.cache.get::<Vec<MarketSummary>>(cache_key).await {
         return (StatusCode::OK, Json(cached));
     }
 
     let markets = match state.reader.get_markets().await {
         Ok(v) => v,
-        Err(_) => return (StatusCode::BAD_GATEWAY, Json(serde_json::json!({"error":"rpc failure"}))),
+        Err(_) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(serde_json::json!({"error":"rpc failure"})),
+            )
+        }
     };
 
     let futs = markets.into_iter().map(|m| {
@@ -90,20 +101,41 @@ pub async fn get_markets(Extension(state): Extension<Arc<AppState>>) -> impl Int
     (StatusCode::OK, Json(out))
 }
 
-async fn get_market(Path(market_id): Path<String>, Extension(state): Extension<Arc<AppState>>) -> impl IntoResponse {
+async fn get_market(
+    Path(market_id): Path<String>,
+    Extension(state): Extension<Arc<AppState>>,
+) -> impl IntoResponse {
     let key = format!("market_detail:{}", market_id.to_lowercase());
-    if let Some(cached): Option<serde_json::Value> = state.cache.get(&key).await {
+    if let Some(cached) = state.cache.get::<serde_json::Value>(&key).await {
         return (StatusCode::OK, Json(cached));
     }
 
     let detail = match state.reader.get_market_detail(&market_id).await {
         Ok(v) => v,
-        Err(ReaderError::NotFound) => return (StatusCode::NOT_FOUND, Json(serde_json::json!({"error":"market not found"}))),
-        Err(_) => return (StatusCode::BAD_GATEWAY, Json(serde_json::json!({"error":"rpc failure"}))),
+        Err(ReaderError::NotFound) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(serde_json::json!({"error":"market not found"})),
+            )
+        }
+        Err(_) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(serde_json::json!({"error":"rpc failure"})),
+            )
+        }
     };
 
     // For top positions, assume detail contains position ids under "top_positions"
-    let top_positions: Vec<String> = detail.get("top_positions").and_then(|v| v.as_array()).map(|arr| arr.iter().filter_map(|x| x.as_str().map(|s| s.to_string())).collect()).unwrap_or_default();
+    let top_positions: Vec<String> = detail
+        .get("top_positions")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
 
     let futs = top_positions.iter().map(|p| {
         let r = state.reader.clone();
@@ -118,7 +150,7 @@ async fn get_market(Path(market_id): Path<String>, Extension(state): Extension<A
         }
     }
 
-    let mut resp = serde_json::json!({
+    let resp = serde_json::json!({
         "market": detail,
         "top_positions": positions,
     });
@@ -129,16 +161,27 @@ async fn get_market(Path(market_id): Path<String>, Extension(state): Extension<A
     (StatusCode::OK, Json(resp))
 }
 
-async fn get_positions(Path(account): Path<String>, Extension(state): Extension<Arc<AppState>>) -> impl IntoResponse {
+async fn get_positions(
+    Path(account): Path<String>,
+    Extension(state): Extension<Arc<AppState>>,
+) -> impl IntoResponse {
     let acct = account.to_lowercase();
     // validate simple format
     if acct.len() != 56 || !(acct.starts_with('g') || acct.starts_with('G')) {
-        return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error":"invalid account"})))
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error":"invalid account"})),
+        );
     }
 
     let positions = match state.reader.get_account_positions(&acct).await {
         Ok(v) => v,
-        Err(_) => return (StatusCode::BAD_GATEWAY, Json(serde_json::json!({"error":"rpc failure"}))),
+        Err(_) => {
+            return (
+                StatusCode::BAD_GATEWAY,
+                Json(serde_json::json!({"error":"rpc failure"})),
+            )
+        }
     };
 
     if positions.is_empty() {
@@ -160,7 +203,9 @@ async fn get_positions(Path(account): Path<String>, Extension(state): Extension<
                     if let Some(entry_price) = v.get("entry_price").and_then(|x| x.as_f64()) {
                         let size = v.get("size").and_then(|x| x.as_f64()).unwrap_or(0.0);
                         let pnl = (price - entry_price) * size;
-                        v.as_object_mut().map(|m| { m.insert("current_pnl".to_string(), serde_json::json!(pnl)); });
+                        v.as_object_mut().map(|m| {
+                            m.insert("current_pnl".to_string(), serde_json::json!(pnl));
+                        });
                     }
                 }
             }

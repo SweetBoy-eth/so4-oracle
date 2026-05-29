@@ -1,7 +1,8 @@
 use serde::Deserialize;
 use worker::{Fetch, Url};
 
-pub const COINBASE_EXCHANGE_RATES_URL: &str = "https://api.coinbase.com/v2/exchange-rates?currency=";
+pub const COINBASE_EXCHANGE_RATES_URL: &str =
+    "https://api.coinbase.com/v2/exchange-rates?currency=";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CoinbasePriceError {
@@ -22,20 +23,23 @@ pub struct CoinbaseResponse {
     pub data: CoinbaseRates,
 }
 
-pub fn parse_coinbase_response_body(
-    body: &str,
-) -> Result<i128, CoinbasePriceError> {
+pub fn parse_coinbase_response_body(body: &str) -> Result<i128, CoinbasePriceError> {
     let resp: CoinbaseResponse =
         serde_json::from_str(body).map_err(|err| CoinbasePriceError::JsonError(err.to_string()))?;
 
-    let usd_price_str = resp.data.rates.get("USD").ok_or(CoinbasePriceError::MissingUsdRate)?;
-    
+    let usd_price_str = resp
+        .data
+        .rates
+        .get("USD")
+        .ok_or(CoinbasePriceError::MissingUsdRate)?;
+
     // We can reuse the precision parsing from binance, but map the error
-    crate::binance::parse_price_to_precision(usd_price_str)
-        .map_err(|err| match err {
-            crate::binance::BinancePriceError::PriceParseError(msg) => CoinbasePriceError::PriceParseError(msg),
-            _ => CoinbasePriceError::PriceParseError("unknown parse error".to_string()),
-        })
+    crate::binance::parse_price_to_precision(usd_price_str).map_err(|err| match err {
+        crate::binance::BinancePriceError::PriceParseError(msg) => {
+            CoinbasePriceError::PriceParseError(msg)
+        }
+        _ => CoinbasePriceError::PriceParseError("unknown parse error".to_string()),
+    })
 }
 
 pub fn parse_coinbase_http_response(
@@ -55,9 +59,7 @@ pub fn parse_coinbase_http_result(
     parse_coinbase_http_response(status_code, &body)
 }
 
-pub async fn fetch_spot_price(
-    symbol: &str,
-) -> Result<i128, CoinbasePriceError> {
+pub async fn fetch_spot_price(symbol: &str) -> Result<i128, CoinbasePriceError> {
     // Usually the symbol passed is something like "BTC".
     // If it comes with USDT suffix, we should strip it or ensure we query the base asset.
     let base_currency = if symbol.ends_with("USDT") {
@@ -69,20 +71,20 @@ pub async fn fetch_spot_price(
     };
 
     let url_str = format!("{}{}", COINBASE_EXCHANGE_RATES_URL, base_currency);
-    let coinbase_url = Url::parse(&url_str)
-        .map_err(|err| CoinbasePriceError::NetworkError(err.to_string()))?;
-        
+    let coinbase_url =
+        Url::parse(&url_str).map_err(|err| CoinbasePriceError::NetworkError(err.to_string()))?;
+
     let mut response = Fetch::Url(coinbase_url)
         .send()
         .await
         .map_err(|err| CoinbasePriceError::NetworkError(err.to_string()))?;
-        
+
     let status = response.status_code();
     let body = response
         .text()
         .await
         .map_err(|err| CoinbasePriceError::NetworkError(err.to_string()))?;
-        
+
     parse_coinbase_http_result(Ok((status, body)))
 }
 

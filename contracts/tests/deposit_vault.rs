@@ -26,7 +26,7 @@ impl ExecuteDepositInvoker {
         oracle_price: u128,
     ) {
         let vault = DepositVaultClient::new(&env, &contract);
-        vault.execute_deposit(&caller, &deposit_id, &oracle_price);
+        vault.execute_vault_deposit(&caller, &deposit_id, &oracle_price);
     }
 }
 

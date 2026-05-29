@@ -1,4 +1,4 @@
-use ed25519_dalek::{Signer, SigningKey, Signature};
+use ed25519_dalek::{Signature, Signer, SigningKey};
 
 /// Error that can occur during signing
 #[derive(Debug, PartialEq, Eq)]
@@ -13,16 +13,19 @@ impl std::fmt::Display for SigningError {
         match self {
             SigningError::MissingPrivateKey => write!(f, "KEEPER_PRIVATE_KEY is not set"),
             SigningError::InvalidHexKey => write!(f, "KEEPER_PRIVATE_KEY is not valid hex"),
-            SigningError::InvalidKeyLength => write!(f, "KEEPER_PRIVATE_KEY must be exactly 32 bytes (64 hex chars)"),
+            SigningError::InvalidKeyLength => write!(
+                f,
+                "KEEPER_PRIVATE_KEY must be exactly 32 bytes (64 hex chars)"
+            ),
         }
     }
 }
 
 /// Sign a price update message using the ed25519 keeper key.
-/// 
+///
 /// The message layout is:
 /// `network_passphrase ‖ ledger_seq ‖ token_strkey ‖ min ‖ max ‖ timestamp`
-/// 
+///
 /// Data types:
 /// - `network_passphrase`: UTF-8 bytes
 /// - `ledger_seq`: u32 Big-Endian
@@ -44,7 +47,7 @@ pub fn sign_price(
     if key_bytes.len() != 32 {
         return Err(SigningError::InvalidKeyLength);
     }
-    
+
     let key_array: [u8; 32] = key_bytes.try_into().unwrap();
     let signing_key = SigningKey::from_bytes(&key_array);
 
@@ -59,7 +62,7 @@ pub fn sign_price(
 
     // 3. Sign the payload
     let signature = signing_key.sign(&payload);
-    
+
     Ok(signature)
 }
 
@@ -79,7 +82,8 @@ mod tests {
     fn test_sign_price_validates() {
         // A known dummy 32-byte private key in hex
         let private_key_hex = "1111111111111111111111111111111111111111111111111111111111111111";
-        let signing_key = SigningKey::from_bytes(&hex::decode(private_key_hex).unwrap().try_into().unwrap());
+        let signing_key =
+            SigningKey::from_bytes(&hex::decode(private_key_hex).unwrap().try_into().unwrap());
         let public_key = signing_key.verifying_key();
 
         let network_passphrase = "Test SDF Network ; September 2015";
@@ -98,7 +102,8 @@ mod tests {
             min,
             max,
             timestamp,
-        ).expect("signing failed");
+        )
+        .expect("signing failed");
 
         // Construct expected payload
         let mut expected_payload = Vec::new();
@@ -110,7 +115,10 @@ mod tests {
         expected_payload.extend_from_slice(&timestamp.to_be_bytes());
 
         // Verify the signature against the public key
-        assert!(public_key.verify(&expected_payload, &signature).is_ok(), "Signature must be valid");
+        assert!(
+            public_key.verify(&expected_payload, &signature).is_ok(),
+            "Signature must be valid"
+        );
     }
 
     #[test]

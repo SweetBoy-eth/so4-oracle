@@ -1,0 +1,39 @@
+services:
+  stellar:
+    image: stellar/quickstart:testing
+    ports:
+      - "8000:8000"
+    command: --testnet --enable-soroban-rpc
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 5
+
+  apis:
+    build:
+      context: .
+      dockerfile: Dockerfile.apis
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: "3000"
+      REDIS_URL: redis://redis:6379
+      STELLAR_RPC_URL: http://stellar:8000/soroban/rpc
+      HORIZON_URL: http://stellar:8000
+    depends_on:
+      redis:
+        condition: service_healthy
+      stellar:
+        condition: service_healthy

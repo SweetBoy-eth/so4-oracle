@@ -72,10 +72,7 @@ pub struct OutlierFilterResult {
 }
 
 /// Filter out prices that deviate more than 3 standard deviations from the median.
-pub fn filter_outliers(
-    prices: &[i128],
-    sources: &[String],
-) -> OutlierFilterResult {
+pub fn filter_outliers(prices: &[i128], sources: &[String]) -> OutlierFilterResult {
     if prices.is_empty() {
         return OutlierFilterResult {
             filtered_prices: vec![],
@@ -96,10 +93,14 @@ pub fn filter_outliers(
     // 2. Compute mean and standard deviation
     let sum: i128 = prices.iter().sum();
     let mean = sum as f64 / prices.len() as f64;
-    let variance = prices.iter().map(|&p| {
-        let diff = p as f64 - mean;
-        diff * diff
-    }).sum::<f64>() / prices.len() as f64;
+    let variance = prices
+        .iter()
+        .map(|&p| {
+            let diff = p as f64 - mean;
+            diff * diff
+        })
+        .sum::<f64>()
+        / prices.len() as f64;
     let stddev = variance.sqrt();
 
     let mut filtered_prices = Vec::new();
@@ -136,7 +137,6 @@ pub fn compute_median(prices: &[i128]) -> Option<i128> {
         Some(sorted[sorted.len() / 2])
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -319,14 +319,14 @@ mod tests {
             "src4".to_string(),
             "bad_src".to_string(),
         ];
-        
+
         let result = filter_outliers(&prices, &sources);
-        
+
         // Should reject 1
         assert_eq!(result.rejected.len(), 1);
         assert_eq!(result.rejected[0].0, "bad_src");
         assert_eq!(result.rejected[0].1, 10000);
-        
+
         // Should keep 4
         assert_eq!(result.filtered_prices.len(), 4);
         assert!(!result.filtered_prices.contains(&10000));
@@ -335,7 +335,7 @@ mod tests {
 
     #[test]
     fn test_filter_outliers_degenerate_case() {
-        // If all are far apart (e.g. standard deviation is huge), maybe none are rejected, 
+        // If all are far apart (e.g. standard deviation is huge), maybe none are rejected,
         // or if they are all outliers from the median (e.g., [10, 1000, 100000]).
         // Wait, if N=3, dev > 3*stddev is impossible because max dev is < stddev * sqrt(N-1).
         // Let's just ensure it doesn't crash on empty.
