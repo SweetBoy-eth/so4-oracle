@@ -92,6 +92,47 @@ pub fn build_balance_response(cfg: &KeeperBalanceConfig, stroops: i64) -> Balanc
     }
 }
 
+/// Testnet Friendbot URL base (Issue #120).
+pub const FRIENDBOT_URL: &str = "https://friendbot.stellar.org";
+
+/// Call the Stellar testnet Friendbot to fund `account_id`.
+///
+/// Uses `worker::Fetch` (the only HTTP client available in the WASM Worker
+/// runtime).  Returns `Ok(())` on a 200/400 response (400 means the account
+/// already exists/is funded, which is not an error).  Returns `Err` on
+/// network failures or other non-success statuses.
+///
+/// This function must be called directly inside an `async` Cloudflare Worker
+/// handler — it must **not** be spawned, because `worker::Fetch` futures are
+/// `!Send`.
+pub async fn fund_keeper_via_friendbot(account_id: &str) -> Result<(), String> {
+    let url = format!("{FRIENDBOT_URL}?addr={account_id}");
+    worker::console_log!("[keeper] calling Friendbot for account {account_id}");
+
+    let request = worker::Request::new(&url, worker::Method::Get)
+        .map_err(|e| format!("failed to build Friendbot request: {e}"))?;
+
+    let mut response = worker::Fetch::Request(request)
+        .send()
+        .await
+        .map_err(|e| format!("Friendbot fetch failed: {e}"))?;
+
+    let status = response.status_code();
+    // 200 = funded; 400 = account already exists (idempotent — treat as success)
+    if status == 200 || status == 400 {
+        worker::console_log!("[keeper] Friendbot response {status} for {account_id}");
+        return Ok(());
+    }
+
+    let body = response
+        .text()
+        .await
+        .unwrap_or_else(|_| "(unreadable body)".to_string());
+    Err(format!(
+        "Friendbot returned {status} for {account_id}: {body}"
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

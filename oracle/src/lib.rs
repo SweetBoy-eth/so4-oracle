@@ -144,11 +144,39 @@ async fn scheduled(_event: ScheduledEvent, env: Env, _ctx: ScheduleContext) -> R
 
     let balance_xlm = balance_stroops as f64 / keeper::XLM_IN_STROOPS as f64;
     if balance_xlm < keeper_cfg.min_balance_xlm {
-        log::error(
-            "insufficient_balance",
-            json!({"balance_xlm": balance_xlm, "min_balance_xlm": keeper_cfg.min_balance_xlm}),
-        );
-        return Ok(());
+        // Issue #120 — auto-fund on testnet; alert-only on mainnet.
+        match net_cfg.network {
+            StellarNetwork::Testnet => {
+                log::warn(
+                    "low_balance_funding",
+                    json!({
+                        "balance_xlm": balance_xlm,
+                        "min_balance_xlm": keeper_cfg.min_balance_xlm,
+                        "action": "calling_friendbot"
+                    }),
+                );
+                match keeper::fund_keeper_via_friendbot(&keeper_cfg.account_id).await {
+                    Ok(()) => log::info(
+                        "friendbot_funded",
+                        json!({"account": keeper_cfg.account_id}),
+                    ),
+                    Err(e) => log::error("friendbot_failed", json!({"error": e})),
+                }
+                // Skip this cycle — balance will be confirmed on next cron tick.
+                return Ok(());
+            }
+            StellarNetwork::Mainnet => {
+                log::error(
+                    "insufficient_balance",
+                    json!({
+                        "balance_xlm": balance_xlm,
+                        "min_balance_xlm": keeper_cfg.min_balance_xlm,
+                        "action": "manual_top_up_required"
+                    }),
+                );
+                return Ok(());
+            }
+        }
     }
 
     // 4. Fetch ledger sequence.

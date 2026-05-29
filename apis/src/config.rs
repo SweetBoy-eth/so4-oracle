@@ -28,3 +28,9 @@ static TOKENS: Lazy<HashMap<String, TokenFeedEntry>> = Lazy::new(|| {
 pub fn lookup_token(addr: &str) -> Option<TokenFeedEntry> {
     TOKENS.get(&addr.to_lowercase()).cloned()
 }
+
+/// Return all configured token entries (used by the history background task).
+pub fn all_tokens() -> Option<Vec<TokenFeedEntry>> {
+    let tokens: Vec<TokenFeedEntry> = TOKENS.values().cloned().collect();
+    if tokens.is_empty() { None } else { Some(tokens) }
+}

@@ -1,22 +1,47 @@
 use crate::cache::Cache;
 use crate::config::lookup_token;
+use crate::history::{HistoryStore, Interval};
 use crate::state::{AppState, MarketSummary, Reader, ReaderError};
 use axum::{
-    extract::Path, http::StatusCode, response::IntoResponse, routing::get, Extension, Json, Router,
+    extract::{Path, Query},
+    http::StatusCode,
+    response::IntoResponse,
+    routing::get,
+    Extension, Json, Router,
 };
 use futures::future::join_all;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use std::time::Duration;
 
 pub async fn run() -> Result<(), anyhow::Error> {
     let cache = Cache::new();
     let reader = Arc::new(crate::client::RpcClient) as Arc<dyn Reader + Send + Sync>;
-    let state = AppState { cache, reader };
+    let history = HistoryStore::new();
+
+    // Background task: record a price tick every 60 seconds for all known tokens.
+    let history_bg = history.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            let ts = chrono::Utc::now().timestamp() as u64;
+            // Iterate over all tokens in the static config and record mid-price.
+            if let Some(tokens) = crate::config::all_tokens() {
+                for entry in tokens {
+                    let mid = (entry.min + entry.max) / 2.0;
+                    history_bg.record(&entry.token, ts, mid);
+                }
+            }
+        }
+    });
+
+    let state = AppState { cache, reader, history };
 
     let app = Router::new()
         .route("/health", get(health))
         .route("/prices/:token", get(get_price))
+        .route("/prices/:token/history", get(get_price_history))
         .route("/markets", get(get_markets))
         .route("/markets/:market_id", get(get_market))
         .route("/positions/:account", get(get_positions))
@@ -30,6 +55,67 @@ pub async fn run() -> Result<(), anyhow::Error> {
 
 async fn health() -> Json<serde_json::Value> {
     Json(serde_json::json!({"status":"ok"}))
+}
+
+// ── GET /prices/:token/history ───────────────────────────────────────────────
+
+#[derive(Deserialize)]
+struct HistoryQuery {
+    /// Candle interval: "1m", "5m", or "1h" (default: "1m").
+    interval: Option<String>,
+    /// Unix timestamp (seconds) — start of range (default: now − 24 h).
+    from: Option<u64>,
+    /// Unix timestamp (seconds) — end of range (default: now).
+    to: Option<u64>,
+}
+
+pub async fn get_price_history(
+    Path(token): Path<String>,
+    Query(params): Query<HistoryQuery>,
+    Extension(state): Extension<Arc<AppState>>,
+) -> impl IntoResponse {
+    let interval_str = params.interval.as_deref().unwrap_or("1m");
+    let interval = match Interval::from_str(interval_str) {
+        Some(i) => i,
+        None => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "invalid interval — use 1m, 5m, or 1h"})),
+            )
+                .into_response();
+        }
+    };
+
+    let now = chrono::Utc::now().timestamp() as u64;
+    let to = params.to.unwrap_or(now);
+    let from = params.from.unwrap_or_else(|| to.saturating_sub(86_400));
+
+    if from > to {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(serde_json::json!({"error": "`from` must be <= `to`"})),
+        )
+            .into_response();
+    }
+
+    match state.history.query(&token, from, to, interval) {
+        Some(candles) => (
+            StatusCode::OK,
+            Json(serde_json::json!({
+                "token": token.to_lowercase(),
+                "interval": interval_str,
+                "from": from,
+                "to": to,
+                "candles": candles,
+            })),
+        )
+            .into_response(),
+        None => (
+            StatusCode::NOT_FOUND,
+            Json(serde_json::json!({"error": "no history for token"})),
+        )
+            .into_response(),
+    }
 }
 
 #[derive(Serialize)]

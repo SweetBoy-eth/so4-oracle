@@ -1,4 +1,5 @@
 use crate::cache::Cache;
+use crate::history::HistoryStore;
 use async_trait::async_trait;
 use serde::Serialize;
 use std::sync::Arc;
@@ -8,6 +9,7 @@ use thiserror::Error;
 pub struct AppState {
     pub cache: Cache,
     pub reader: Arc<dyn Reader + Send + Sync>,
+    pub history: HistoryStore,
 }
 
 #[derive(Error, Debug)]
