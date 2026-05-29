@@ -29,6 +29,8 @@ pub struct TokenPrice {
 const FAILED_SUBMISSIONS_KV_KEY: &str = "oracle:failed-submissions";
 const ORACLE_STATUS_KV_KEY: &str = "oracle:status";
 const FAILED_SUBMISSION_TTL_SECONDS: u32 = 600;
+const LAST_SUBMITTED_PRICE_KV_PREFIX: &str = "oracle:last-price:";
+const CACHED_PRICES_KV_KEY: &str = "oracle:cached-prices";
 
 pub async fn store_failed_submission(
     env: &Env,
@@ -121,6 +123,78 @@ pub async fn get_oracle_status(env: &Env) -> Result<OracleStatus, String> {
             recent_errors: vec![],
         }),
         Err(e) => Err(format!("failed to get status: {}", e)),
+    }
+}
+
+pub async fn store_last_submitted_price(
+    env: &Env,
+    token_symbol: &str,
+    price: i128,
+) -> Result<(), String> {
+    let kv = env
+        .kv("ORACLE_KV")
+        .map_err(|e| format!("failed to get KV namespace: {}", e))?;
+
+    let key = format!("{}{}", LAST_SUBMITTED_PRICE_KV_PREFIX, token_symbol);
+    let value = price.to_string();
+
+    kv.put(&key, &value)
+        .map_err(|e| format!("failed to put in KV: {}", e))?
+        .execute()
+        .await
+        .map_err(|e| format!("failed to store last price: {}", e))?;
+
+    Ok(())
+}
+
+pub async fn get_last_submitted_price(env: &Env, token_symbol: &str) -> Result<Option<i128>, String> {
+    let kv = env
+        .kv("ORACLE_KV")
+        .map_err(|e| format!("failed to get KV namespace: {}", e))?;
+
+    let key = format!("{}{}", LAST_SUBMITTED_PRICE_KV_PREFIX, token_symbol);
+    match kv.get(&key).text().await {
+        Ok(Some(value)) => {
+            let price = value
+                .parse::<i128>()
+                .map_err(|e| format!("failed to parse price: {}", e))?;
+            Ok(Some(price))
+        }
+        Ok(None) => Ok(None),
+        Err(e) => Err(format!("failed to get last price: {}", e)),
+    }
+}
+
+pub async fn store_cached_prices(
+    env: &Env,
+    prices: &[crate::CachedPrice],
+) -> Result<(), String> {
+    let kv = env
+        .kv("ORACLE_KV")
+        .map_err(|e| format!("failed to get KV namespace: {}", e))?;
+
+    let value =
+        serde_json::to_string(prices).map_err(|e| format!("failed to serialize prices: {}", e))?;
+
+    kv.put(CACHED_PRICES_KV_KEY, &value)
+        .map_err(|e| format!("failed to put in KV: {}", e))?
+        .execute()
+        .await
+        .map_err(|e| format!("failed to store prices: {}", e))?;
+
+    Ok(())
+}
+
+pub async fn get_cached_prices(env: &Env) -> Result<Vec<crate::CachedPrice>, String> {
+    let kv = env
+        .kv("ORACLE_KV")
+        .map_err(|e| format!("failed to get KV namespace: {}", e))?;
+
+    match kv.get(CACHED_PRICES_KV_KEY).text().await {
+        Ok(Some(value)) => serde_json::from_str::<Vec<crate::CachedPrice>>(&value)
+            .map_err(|e| format!("failed to parse cached prices: {}", e)),
+        Ok(None) => Err("no cached prices".to_string()),
+        Err(e) => Err(format!("failed to get cached prices: {}", e)),
     }
 }
 

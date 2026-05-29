@@ -7,6 +7,10 @@ pub struct TokenFeedConfig {
     pub symbol: String,
     pub stellar_address: String,
     pub sources: Vec<String>,
+    #[serde(default)]
+    pub binance_symbol: Option<String>,
+    #[serde(default)]
+    pub pyth_feed_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]

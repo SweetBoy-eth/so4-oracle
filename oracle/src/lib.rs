@@ -8,13 +8,26 @@ pub mod binance;
 pub mod config;
 pub mod keeper;
 pub mod kv_store;
+pub mod log;
 pub mod network_config;
 pub mod prices;
+pub mod pyth;
 pub mod retry;
 pub mod stellar_rpc;
 pub mod submit;
 
 use network_config::StellarNetwork;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CachedPrice {
+    pub token: String,
+    pub symbol: String,
+    pub min: i128,
+    pub max: i128,
+    pub timestamp: u64,
+    pub sources_used: Vec<String>,
+}
 
 fn router() -> Router {
     Router::new().route("/", get(root))
@@ -37,6 +50,7 @@ async fn fetch(
         "/keeper/balance" => handle_keeper_balance(&env).await,
         "/oracle/status" => handle_oracle_status(&env).await,
         "/oracle/failed-submissions" => handle_failed_submissions(&env).await,
+        "/prices" => handle_get_prices(&env).await,
         _ => Ok(router().call(req).await?),
     }
 }
@@ -81,35 +95,36 @@ fn json_error(status: u16, msg: &str) -> Result<axum::http::Response<axum::body:
 /// Local testing: `wrangler dev --test-scheduled`
 #[event(scheduled)]
 async fn scheduled(_event: ScheduledEvent, env: Env, _ctx: ScheduleContext) -> Result<()> {
+    use serde_json::json;
+
+    let start_time = current_timestamp();
+
     // 1. Parse feed configuration.
     let feed_cfg = match config::load_from_env(&env) {
         Ok(cfg) => cfg,
         Err(e) => {
-            console_error!("[oracle] startup config error: {e}");
+            log::error("config_error", json!({"error": e.to_string()}));
             return Err(Error::from(e.to_string()));
         }
     };
 
-    // 2. Load network config (STELLAR_NETWORK selects testnet/mainnet defaults).
+    // 2. Load network config.
     let net_cfg = match network_config::load_network_config(&env) {
         Ok(cfg) => cfg,
         Err(e) => {
-            console_error!("[oracle] network config error: {e}");
+            log::error("network_config_error", json!({"error": e.to_string()}));
             return Err(Error::from(e.to_string()));
         }
     };
-    console_log!(
-        "[oracle] network={:?} rpc={}",
-        net_cfg.network,
-        net_cfg.rpc_url
-    );
 
-    // 3. Check keeper balance before doing anything on-chain.
+    log::info("cycle_start", json!({"network": format!("{:?}", net_cfg.network)}));
+
+    // 3. Check keeper balance.
     let horizon_url = default_horizon_url(&net_cfg.network);
     let keeper_cfg = match keeper::load_keeper_config(&env, horizon_url) {
         Ok(cfg) => cfg,
         Err(e) => {
-            console_error!("[oracle] keeper config error: {e}");
+            log::error("keeper_config_error", json!({"error": e.to_string()}));
             return Err(Error::from(e));
         }
     };
@@ -117,90 +132,221 @@ async fn scheduled(_event: ScheduledEvent, env: Env, _ctx: ScheduleContext) -> R
     let balance_stroops = match keeper::check_keeper_balance(&keeper_cfg).await {
         Ok(b) => b,
         Err(e) => {
-            console_error!("[oracle] balance check failed: {e}");
+            log::error("balance_check_error", json!({"error": e.to_string()}));
             return Err(Error::from(e.to_string()));
         }
     };
 
     let balance_xlm = balance_stroops as f64 / keeper::XLM_IN_STROOPS as f64;
     if balance_xlm < keeper_cfg.min_balance_xlm {
-        console_error!(
-            "[oracle] skipping submission — balance {balance_xlm:.7} XLM below minimum {:.7}",
-            keeper_cfg.min_balance_xlm
+        log::error(
+            "insufficient_balance",
+            json!({"balance_xlm": balance_xlm, "min_balance_xlm": keeper_cfg.min_balance_xlm}),
         );
         return Ok(());
     }
 
-    // 4. Fetch the current ledger sequence.
+    // 4. Fetch ledger sequence.
     let ledger_seq = match stellar_rpc::get_latest_ledger_sequence(&net_cfg.rpc_url).await {
-        Ok(seq) => {
-            console_log!("[oracle] ledger sequence: {seq}");
-            seq
-        }
+        Ok(seq) => seq,
         Err(e) => {
-            console_error!("[oracle] failed to fetch ledger sequence: {e}");
+            log::error("ledger_fetch_error", json!({"error": e.to_string()}));
             return Err(Error::from(e.to_string()));
         }
     };
 
-    // 5. Fetch prices with retry (exponential backoff, 3 attempts, 200 ms base).
-    let binance_symbols: Vec<String> = feed_cfg
-        .tokens
-        .iter()
-        .filter(|t| t.sources.iter().any(|s| s == "binance"))
-        .map(|t| format!("{}USDT", t.symbol))
-        .collect();
+    // 5. Fetch prices from all sources.
+    #[derive(Debug)]
+    struct TokenPrices {
+        prices: Vec<i128>,
+        sources: Vec<String>,
+    }
 
-    let raw_prices = if !binance_symbols.is_empty() {
-        let symbols = binance_symbols.clone();
-        match retry::retry_with_backoff(
-            || {
-                let syms = symbols.clone();
-                async move { binance::fetch_spot_prices(&syms).await }
-            },
-            3,
-            200,
-        )
-        .await
-        {
-            Ok(p) => {
-                console_log!("[oracle] fetched {} price(s) from Binance", p.len());
-                p
-            }
-            Err(e) => {
-                console_error!("[oracle] Binance fetch failed after retries: {e:?}");
-                return Err(Error::from("price fetch failed"));
+    let mut all_prices: std::collections::BTreeMap<String, TokenPrices> =
+        std::collections::BTreeMap::new();
+
+    for token in &feed_cfg.tokens {
+        let mut token_prices = Vec::new();
+        let mut sources_used = Vec::new();
+
+        for source in &token.sources {
+            match source.as_str() {
+                "binance" => {
+                    let symbol = token
+                        .binance_symbol
+                        .as_ref()
+                        .map(|s| s.clone())
+                        .unwrap_or_else(|| format!("{}USDT", token.symbol));
+
+                    match retry::retry_with_backoff(
+                        || {
+                            let sym = symbol.clone();
+                            async move { binance::fetch_spot_prices(&[sym]).await }
+                        },
+                        3,
+                        200,
+                    )
+                    .await
+                    {
+                        Ok(prices) => {
+                            if !prices.is_empty() {
+                                token_prices.push(prices[0].1);
+                                sources_used.push("binance".to_string());
+                            }
+                        }
+                        Err(e) => {
+                            log::error(
+                                "binance_fetch_error",
+                                json!({"token": token.symbol.clone(), "error": format!("{:?}", e)}),
+                            );
+                        }
+                    }
+                }
+                "pyth" => {
+                    if let Some(feed_id) = &token.pyth_feed_id {
+                        match pyth::fetch_pyth_price(feed_id).await {
+                            Ok(price) => {
+                                token_prices.push(price);
+                                sources_used.push("pyth".to_string());
+                            }
+                            Err(e) => {
+                                log::error(
+                                    "pyth_fetch_error",
+                                    json!({"token": token.symbol.clone(), "error": format!("{:?}", e)}),
+                                );
+                            }
+                        }
+                    }
+                }
+                _ => {}
             }
         }
-    } else {
-        vec![]
-    };
 
-    if raw_prices.is_empty() {
-        console_log!("[oracle] no prices to submit at ledger {ledger_seq}");
+        if !token_prices.is_empty() {
+            all_prices.insert(
+                token.symbol.clone(),
+                TokenPrices {
+                    prices: token_prices,
+                    sources: sources_used,
+                },
+            );
+        }
+    }
+
+    if all_prices.is_empty() {
+        log::error("no_prices_fetched", json!({}));
         return Ok(());
     }
 
-    // 6. Compute confidence interval (10th/90th percentile spread).
-    let price_values: Vec<i128> = raw_prices.iter().map(|(_, p)| *p).collect();
-    let spread = prices::compute_confidence_interval(&price_values);
-    console_log!("[oracle] price spread: {:?} at ledger {ledger_seq}", spread);
+    // 6. Apply circuit breaker checks.
+    let threshold_percent: f64 = env
+        .var("PRICE_MOVEMENT_THRESHOLD")
+        .ok()
+        .and_then(|v| v.to_string().parse().ok())
+        .unwrap_or(10.0);
 
-    // 7. TODO: sign PriceProps {min, max} with KEEPER_SECRET_KEY, build and
-    //    submit the Soroban set_prices transaction XDR:
-    //
-    //    let signed_xdr = build_signed_xdr(&net_cfg, &spread, ledger_seq)?;
-    //    let ledger_confirmed = submit::submit_and_poll(&net_cfg.rpc_url, &signed_xdr).await?;
-    //    console_log!("[oracle] prices committed at ledger {ledger_confirmed}");
+    let mut cached_prices: Vec<CachedPrice> = Vec::new();
 
-    console_log!(
-        "[oracle] scheduled cycle complete — network={:?} ledger_seq={ledger_seq} \
-         prices={:?} spread={:?}",
-        net_cfg.network,
-        raw_prices,
-        spread,
+    for token in &feed_cfg.tokens {
+        if let Some(token_prices) = all_prices.get(&token.symbol) {
+            if token_prices.prices.is_empty() {
+                continue;
+            }
+
+            let aggregated = prices::compute_confidence_interval(&token_prices.prices);
+            let (min, max) = match aggregated {
+                Some(props) => (props.min, props.max),
+                None => continue,
+            };
+
+            let median = if token_prices.prices.len() % 2 == 0 {
+                (token_prices.prices[token_prices.prices.len() / 2 - 1]
+                    + token_prices.prices[token_prices.prices.len() / 2])
+                    / 2
+            } else {
+                token_prices.prices[token_prices.prices.len() / 2]
+            };
+
+            let last_price = kv_store::get_last_submitted_price(&env, &token.symbol)
+                .await
+                .ok()
+                .flatten();
+
+            let blocked = if let Some(last) = last_price {
+                let percent_change = ((median as f64 - last as f64) / last as f64).abs() * 100.0;
+                if percent_change > threshold_percent {
+                    log::error(
+                        "price_movement_exceeded",
+                        json!({"token": token.symbol.clone(), "old_price": last, "new_price": median, "percent_change": percent_change}),
+                    );
+                    true
+                } else {
+                    false
+                }
+            } else {
+                false
+            };
+
+            if !blocked {
+                let _ =
+                    kv_store::store_last_submitted_price(&env, &token.symbol, median).await;
+                let timestamp = current_timestamp_secs();
+                cached_prices.push(CachedPrice {
+                    token: token.stellar_address.clone(),
+                    symbol: token.symbol.clone(),
+                    min,
+                    max,
+                    timestamp,
+                    sources_used: token_prices.sources.clone(),
+                });
+            }
+        }
+    }
+
+    // 7. Cache the prices.
+    if !cached_prices.is_empty() {
+        let _ = kv_store::store_cached_prices(&env, &cached_prices).await;
+        log::info(
+            "prices_cached",
+            json!({"count": cached_prices.len(), "timestamp": current_timestamp_secs()}),
+        );
+    }
+
+    let latency = current_timestamp() - start_time;
+    log::info(
+        "cycle_complete",
+        json!({"ledger_seq": ledger_seq, "prices_cached": cached_prices.len(), "latency_ms": latency}),
     );
+
     Ok(())
+}
+
+#[cfg(target_arch = "wasm32")]
+fn current_timestamp() -> u64 {
+    js_sys::Date::now() as u64
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn current_timestamp() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+#[cfg(target_arch = "wasm32")]
+fn current_timestamp_secs() -> u64 {
+    (js_sys::Date::now() / 1000.0) as u64
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn current_timestamp_secs() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }
 
 async fn handle_oracle_status(env: &Env) -> Result<axum::http::Response<axum::body::Body>> {
@@ -235,6 +381,36 @@ async fn handle_failed_submissions(env: &Env) -> Result<axum::http::Response<axu
 
 pub async fn root() -> &'static str {
     "Hello Axum!"
+}
+
+async fn handle_get_prices(env: &Env) -> Result<axum::http::Response<axum::body::Body>> {
+    match kv_store::get_cached_prices(env).await {
+        Ok(prices) => {
+            if prices.is_empty() {
+                let body = r#"{"error":"no_prices","reason":"cache_empty"}"#;
+                return Ok(axum::http::Response::builder()
+                    .status(503)
+                    .header("Content-Type", "application/json")
+                    .body(axum::body::Body::from(body))
+                    .unwrap());
+            }
+            let body = serde_json::to_string(&prices)
+                .unwrap_or_else(|_| r#"{"error":"serialization failed"}"#.to_string());
+            Ok(axum::http::Response::builder()
+                .status(200)
+                .header("Content-Type", "application/json")
+                .body(axum::body::Body::from(body))
+                .unwrap())
+        }
+        Err(_) => {
+            let body = r#"{"error":"no_prices","reason":"cache_empty"}"#;
+            Ok(axum::http::Response::builder()
+                .status(503)
+                .header("Content-Type", "application/json")
+                .body(axum::body::Body::from(body))
+                .unwrap())
+        }
+    }
 }
 
 fn default_horizon_url(network: &StellarNetwork) -> &'static str {
