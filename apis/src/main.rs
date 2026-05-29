@@ -170,17 +170,37 @@ pub fn app(state: AppState) -> Router {
         .with_state(state)
 }
 
+/// Initialise the global tracing subscriber per issue #106.
+///
+/// `LOG_FORMAT=json` (the default in production-style deploys) yields
+/// structured JSON-per-line output suitable for log aggregators.
+/// `LOG_FORMAT=pretty` (the default for local dev) yields the standard
+/// human-readable pretty-printed format. The log level is taken from
+/// `RUST_LOG`, defaulting to `info` for the apis crate and `warn` for
+/// everything else.
+fn init_tracing() {
+    use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("apis=info,tower_http=info,warn"));
+
+    let format = env::var("LOG_FORMAT").unwrap_or_else(|_| "pretty".to_string());
+    let registry = tracing_subscriber::registry().with(filter);
+
+    if format.eq_ignore_ascii_case("json") {
+        registry.with(fmt::layer().json()).init();
+    } else {
+        registry.with(fmt::layer().pretty()).init();
+    }
+}
+
 #[tokio::main]
 async fn main() {
-    server::run().await.unwrap();
-    let state = AppState {
-        oracle_status: Arc::new(RwLock::new(OracleStatus::default())),
-    };
-
-    let app = app(state);
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
-    println!("listening on {}", listener.local_addr().unwrap());
-    axum::serve(listener, app).await.unwrap();
+    init_tracing();
+    if let Err(err) = server::run().await {
+        tracing::error!("server exited with error: {err:?}");
+        std::process::exit(1);
+    }
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
