@@ -259,11 +259,7 @@ fn validate_hex_key(
 /// 56-char base32 with the expected version prefix. This catches typos and
 /// swapped vars at boot; it does not verify the CRC16 or that a secret derives
 /// the configured account (those are wired with the keeper in #3).
-fn validate_strkey(
-    var: &'static str,
-    value: String,
-    prefix: char,
-) -> Result<String, EnvError> {
+fn validate_strkey(var: &'static str, value: String, prefix: char) -> Result<String, EnvError> {
     let invalid = |reason: String| EnvError::InvalidVar { var, reason };
     if value.len() != 56 {
         return Err(invalid(format!(
@@ -394,22 +390,21 @@ mod tests {
     fn parse_or_default_rejects_invalid_value() {
         let mut env = HashMap::new();
         env.insert("TEST_VAR".to_string(), "not_a_number".to_string());
-        let err =
-            parse_or_default::<u64>(&mut |key| env.get(key).cloned(), "TEST_VAR", "10")
-                .unwrap_err();
+        let err = parse_or_default::<u64>(&mut |key| env.get(key).cloned(), "TEST_VAR", "10")
+            .unwrap_err();
         assert!(matches!(
             err,
-            EnvError::InvalidVar { var: "TEST_VAR", .. }
+            EnvError::InvalidVar {
+                var: "TEST_VAR",
+                ..
+            }
         ));
     }
 
     #[test]
     fn parse_or_default_parses_socket_addr() {
         let mut env = HashMap::new();
-        env.insert(
-            "BIND_ADDR".to_string(),
-            "127.0.0.1:3000".to_string(),
-        );
+        env.insert("BIND_ADDR".to_string(), "127.0.0.1:3000".to_string());
         let result = parse_or_default::<std::net::SocketAddr>(
             &mut |key| env.get(key).cloned(),
             "BIND_ADDR",
@@ -638,7 +633,10 @@ mod tests {
 
         assert!(matches!(
             err,
-            EnvError::InvalidVar { var: "KEEPER_ACCOUNT_ID", .. }
+            EnvError::InvalidVar {
+                var: "KEEPER_ACCOUNT_ID",
+                ..
+            }
         ));
     }
 
@@ -655,7 +653,10 @@ mod tests {
 
         assert!(matches!(
             err,
-            EnvError::InvalidVar { var: "KEEPER_SECRET_KEY", .. }
+            EnvError::InvalidVar {
+                var: "KEEPER_SECRET_KEY",
+                ..
+            }
         ));
     }
 

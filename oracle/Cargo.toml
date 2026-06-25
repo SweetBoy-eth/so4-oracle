@@ -8,6 +8,7 @@ authors = ["0xsteins"]
 workspace = true
 
 [lib]
+crate-type = ["cdylib", "rlib"]
 path = "src/lib.rs"
 
 [[bin]]
