@@ -541,6 +541,35 @@ mod tests {
     }
 
     #[test]
+    fn validate_strkey_accepts_s_prefixed() {
+        let value = "SAUHMCMUP5FZO5675W3ISZ6E6CNYJGXBUW5WANE2JR4TGAARYCTSCBKI";
+        let result = validate_strkey("KEEPER_SECRET_KEY", value.to_string(), 'S');
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), value);
+    }
+
+    #[test]
+    fn validate_strkey_rejects_g_prefixed_for_secret() {
+        let value = "GAUHMCMUP5FZO5675W3ISZ6E6CNYJGXBUW5WANE2JR4TGAARYCTSCBKI";
+        let result = validate_strkey("KEEPER_SECRET_KEY", value.to_string(), 'S');
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_strkey_rejects_wrong_length() {
+        let value = "SAUHMC";
+        let result = validate_strkey("KEEPER_SECRET_KEY", value.to_string(), 'S');
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_strkey_rejects_invalid_base32_chars() {
+        let value = "0AUHMCMUP5FZO5675W3ISZ6E6CNYJGXBUW5WANE2JR4TGAARYCTSCB";
+        let result = validate_strkey("KEEPER_SECRET_KEY", value.to_string(), 'S');
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn config_from_lookup_rejects_malformed_keeper_account() {
         let mut env = valid_env();
         env.insert("KEEPER_ACCOUNT_ID", "not-a-strkey".to_string());
