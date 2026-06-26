@@ -264,3 +264,27 @@ async fn all_good_tokens_processed_when_one_fails() {
         "both good tokens must be cached; only the bad one omitted"
     );
 }
+
+#[tokio::test]
+async fn metrics_price_cycle_count_increments_after_partial_failure() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ledger_ok_response()))
+        .mount(&mock_server)
+        .await;
+
+    let tokens = vec![
+        bad_token("FAILME2", "CFAILME21111111111111111111111111111111111111111111111111111"),
+        fixed_token("USDC", "CBAN5YU3KRDKPTQ2H76D6S7HQFPRBGUD524F65BUM2RQCITPTRLKWKES"),
+    ];
+    let state = test_state(&mock_server.uri(), tokens);
+
+    run_price_cycle(Arc::clone(&state)).await;
+
+    let resp = state.metrics.to_response();
+    assert_eq!(
+        resp.price_cycle_count, 1,
+        "price_cycle_count must be 1 after one cycle, even with a partial failure"
+    );
+}
