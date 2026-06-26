@@ -48,6 +48,14 @@ fn ledger_fail() -> serde_json::Value {
     })
 }
 
+fn ledger_timeout_body() -> serde_json::Value {
+    serde_json::json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "error": { "code": -32001, "message": "request timed out" }
+    })
+}
+
 fn fixed_token(symbol: &str, address: &str) -> TokenConfig {
     TokenConfig {
         symbol: symbol.to_string(),
