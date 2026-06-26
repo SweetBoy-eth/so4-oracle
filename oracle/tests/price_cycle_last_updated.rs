@@ -396,3 +396,26 @@ async fn last_updated_not_set_when_token_has_no_sources() {
         "last_updated must stay None when the token has no sources to query"
     );
 }
+
+#[tokio::test]
+async fn cycle_running_is_false_after_successful_cycle() {
+    let mock = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ledger_ok()))
+        .mount(&mock)
+        .await;
+
+    let state = test_state(&mock.uri(), vec![fixed_token("USDC", USDC_ADDR)]);
+
+    run_price_cycle(Arc::clone(&state)).await;
+
+    let status = state.cycle_status.read().await;
+    assert!(
+        !status.price_cycle_running,
+        "price_cycle_running must be false after finish_cycle"
+    );
+    assert!(
+        status.last_price_cycle_at.is_some(),
+        "last_price_cycle_at must be set by finish_cycle"
+    );
+}
