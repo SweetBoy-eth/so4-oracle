@@ -184,6 +184,34 @@ async fn single_bad_token_alone_leaves_cache_empty() {
 }
 
 #[tokio::test]
+async fn failed_token_does_not_overwrite_previous_good_cache_entry() {
+    let mock_server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ledger_ok_response()))
+        .mount(&mock_server)
+        .await;
+
+    // First cycle: USDC succeeds.
+    let tokens = vec![fixed_token(
+        "USDC",
+        "CBAN5YU3KRDKPTQ2H76D6S7HQFPRBGUD524F65BUM2RQCITPTRLKWKES",
+    )];
+    let state = test_state(&mock_server.uri(), tokens);
+    run_price_cycle(Arc::clone(&state)).await;
+
+    let usdc_key = cache_key("CBAN5YU3KRDKPTQ2H76D6S7HQFPRBGUD524F65BUM2RQCITPTRLKWKES");
+    let first_price = state
+        .price_cache
+        .read()
+        .await
+        .prices
+        .get(&usdc_key)
+        .cloned();
+    assert!(first_price.is_some(), "USDC must be cached after first cycle");
+}
+
+#[tokio::test]
 async fn all_good_tokens_processed_when_one_fails() {
     let mock_server = MockServer::start().await;
 
