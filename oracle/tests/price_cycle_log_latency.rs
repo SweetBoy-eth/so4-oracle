@@ -414,3 +414,28 @@ async fn tokens_ok_is_per_token_not_per_source() {
         "tokens_ok = 1: counted per token, not per source"
     );
 }
+
+#[tokio::test]
+async fn tokens_failed_operation_field_identifies_failing_token() {
+    let mock = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(ledger_ok()))
+        .mount(&mock)
+        .await;
+
+    let state = test_state(&mock.uri(), vec![bad_token("MYBAD", FAIL1_ADDR)]);
+
+    run_price_cycle(Arc::clone(&state)).await;
+
+    let failures = state.failures.lock().await;
+    let token_failures: Vec<_> = failures
+        .iter()
+        .filter(|e| e.operation.starts_with("price:"))
+        .collect();
+
+    assert_eq!(token_failures.len(), 1);
+    assert!(
+        token_failures[0].operation.contains("MYBAD"),
+        "failure operation must contain the token symbol so the log is meaningful"
+    );
+}
