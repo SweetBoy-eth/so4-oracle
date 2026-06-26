@@ -14,6 +14,11 @@ use oracle::config::{Config, Network, PriceFeedConfig, SecretString};
 use oracle::price_loop::run_price_cycle;
 use oracle::state::AppState;
 
+const USDC_ADDR: &str = "CBAN5YU3KRDKPTQ2H76D6S7HQFPRBGUD524F65BUM2RQCITPTRLKWKES";
+const XLM_ADDR: &str = "CXLM11111111111111111111111111111111111111111111111111111111";
+const FAIL1_ADDR: &str = "CFAIL1111111111111111111111111111111111111111111111111111111";
+const FAIL2_ADDR: &str = "CFAIL2111111111111111111111111111111111111111111111111111111";
+
 fn ledger_ok() -> serde_json::Value {
     serde_json::json!({
         "jsonrpc": "2.0",
